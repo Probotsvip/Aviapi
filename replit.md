@@ -27,6 +27,8 @@ TubeAPI is a YouTube content download API service that provides developers with 
 - ✅ Files accessible even after bot token or channel changes via file_id
 - ✅ Updated external Python code to use TubeAPI instead of friend's API
 - ✅ Created configuration system for easy API URL/key management
+- ✅ Heroku deployment configuration with one-click deploy button
+- ✅ Automated deployment script for easy Heroku setup
 - ⏳ Stripe payment integration (temporarily disabled for demo)
 
 # User Preferences

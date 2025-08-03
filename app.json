@@ -1,0 +1,46 @@
+{
+  "name": "TubeAPI - YouTube Downloader API",
+  "description": "A YouTube content download API service with Telegram storage backend",
+  "repository": "https://github.com/your-username/tubeapi",
+  "logo": "https://cdn-icons-png.flaticon.com/512/1384/1384060.png",
+  "keywords": ["youtube", "api", "downloader", "telegram", "nodejs", "express"],
+  "stack": "heroku-22",
+  "buildpacks": [
+    {
+      "url": "heroku/nodejs"
+    }
+  ],
+  "env": {
+    "NODE_ENV": {
+      "description": "Environment mode",
+      "value": "production"
+    },
+    "DATABASE_URL": {
+      "description": "PostgreSQL database URL (will be auto-provided by Heroku Postgres)"
+    },
+    "TELEGRAM_BOT_TOKEN": {
+      "description": "Telegram bot token for file storage",
+      "value": "7412125068:AAE_xef9Tgq0MZXpknz3-WPPKK7hl6t3im0"
+    },
+    "TELEGRAM_CHANNEL_ID": {
+      "description": "Telegram channel ID for file storage",
+      "value": "-1002863131570"
+    },
+    "JWT_SECRET": {
+      "description": "JWT secret key for authentication",
+      "generator": "secret"
+    },
+    "PORT": {
+      "description": "Port number (auto-provided by Heroku)",
+      "required": false
+    }
+  },
+  "addons": [
+    {
+      "plan": "heroku-postgresql:essential-0"
+    }
+  ],
+  "scripts": {
+    "postdeploy": "npm run db:push"
+  }
+}
