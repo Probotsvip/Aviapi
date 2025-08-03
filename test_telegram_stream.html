@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Telegram URL Test</title>
+</head>
+<body>
+    <h2>Testing Telegram URL - Stream vs Download</h2>
+    
+    <!-- Direct streaming test -->
+    <h3>1. Audio Streaming Test:</h3>
+    <audio controls style="width: 100%;">
+        <source src="https://api.telegram.org/file/bot7412125068:AAE_xef9Tgq0MZXpknz3-WPPKK7hl6t3im0/music/file_23.mp3" type="audio/mpeg">
+        Your browser does not support the audio element.
+    </audio>
+    
+    <h3>2. Video Streaming Test:</h3>
+    <video controls style="width: 100%; max-width: 600px;">
+        <source src="https://api.telegram.org/file/bot7412125068:AAE_xef9Tgq0MZXpknz3-WPPKK7hl6t3im0/videos/file_15.mp4" type="video/mp4">
+        Your browser does not support the video element.
+    </video>
+    
+    <h3>3. Download Links:</h3>
+    <p>
+        <a href="https://api.telegram.org/file/bot7412125068:AAE_xef9Tgq0MZXpknz3-WPPKK7hl6t3im0/music/file_23.mp3" download="song.mp3">Download Audio File</a>
+    </p>
+    
+    <h3>4. JavaScript Test:</h3>
+    <button onclick="testStream()">Test Stream Response</button>
+    <div id="result"></div>
+    
+    <script>
+        async function testStream() {
+            const url = "https://api.telegram.org/file/bot7412125068:AAE_xef9Tgq0MZXpknz3-WPPKK7hl6t3im0/music/file_23.mp3";
+            
+            try {
+                const response = await fetch(url, { method: 'HEAD' });
+                const contentType = response.headers.get('Content-Type');
+                const contentLength = response.headers.get('Content-Length');
+                const acceptRanges = response.headers.get('Accept-Ranges');
+                
+                document.getElementById('result').innerHTML = `
+                    <p><strong>Status:</strong> ${response.status}</p>
+                    <p><strong>Content-Type:</strong> ${contentType}</p>
+                    <p><strong>Content-Length:</strong> ${contentLength} bytes</p>
+                    <p><strong>Accept-Ranges:</strong> ${acceptRanges}</p>
+                    <p><strong>Streamable:</strong> ${acceptRanges === 'bytes' ? 'YES' : 'NO'}</p>
+                `;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>
