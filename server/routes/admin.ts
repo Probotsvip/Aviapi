@@ -491,6 +491,36 @@ export function registerAdminRoutes(app: Express) {
     }
   });
 
+  // Reset API Key Daily Usage
+  app.post("/api/admin/api-keys/:id/reset-daily", authenticateUser, requireAdmin, async (req, res) => {
+    try {
+      const keyId = req.params.id;
+      
+      await db
+        .update(apiKeys)
+        .set({ 
+          dailyUsage: 0,
+          lastResetDate: new Date()
+        })
+        .where(eq(apiKeys.id, keyId));
+
+      await logAdminAction(
+        req.user!.id,
+        "api_key_daily_reset",
+        "api_key",
+        keyId,
+        { resetDate: new Date().toISOString() },
+        req.ip
+      );
+
+      res.json({ message: "Daily usage reset successfully" });
+
+    } catch (error: any) {
+      console.error("API key daily reset error:", error);
+      res.status(500).json({ message: "Failed to reset daily usage" });
+    }
+  });
+
   // API Testing - Get default admin API key
   app.get("/api/admin/test-api-key", authenticateUser, requireAdmin, async (req, res) => {
     try {

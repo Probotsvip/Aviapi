@@ -124,7 +124,7 @@ export default function AdminPanel() {
   const user = getUser();
   
   // Show login if not authenticated as admin
-  if (!user || user.role !== 'admin') {
+  if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center space-y-4">
@@ -132,7 +132,7 @@ export default function AdminPanel() {
           <p className="text-muted-foreground">Please login with admin credentials</p>
           <div className="space-y-2">
             <Button onClick={() => setLocation('/login')}>Go to Login</Button>
-            <p className="text-xs text-muted-foreground">Admin: admin@tubeapi.dev / admin123</p>
+            <p className="text-xs text-muted-foreground">Admin: admin@tubeapi.com / admin123</p>
           </div>
         </div>
       </div>
@@ -271,6 +271,19 @@ export default function AdminPanel() {
     },
     onError: () => {
       toast({ title: "Failed to reset test key", variant: "destructive" });
+    },
+  });
+
+  // Reset daily usage mutation
+  const resetDailyUsageMutation = useMutation({
+    mutationFn: (keyId: string) =>
+      apiRequest(`/api/admin/api-keys/${keyId}/reset-daily`, { method: "POST" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/api-keys"] });
+      toast({ title: "Daily usage reset successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to reset daily usage", variant: "destructive" });
     },
   });
 
@@ -853,16 +866,43 @@ export default function AdminPanel() {
                         </TableCell>
                         <TableCell>{new Date(key.createdAt).toLocaleDateString()}</TableCell>
                         <TableCell>
-                          {key.isActive && (
+                          <div className="flex items-center space-x-2">
                             <Button
-                              variant="destructive"
+                              variant="outline"
                               size="sm"
-                              onClick={() => revokeApiKeyMutation.mutate(key.id)}
-                              disabled={revokeApiKeyMutation.isPending}
+                              onClick={() => {
+                                navigator.clipboard.writeText(key.key);
+                                toast({ title: "API Key copied to clipboard!" });
+                              }}
+                              title="Copy API Key"
                             >
-                              <Ban className="h-4 w-4" />
+                              <FileText className="h-4 w-4" />
                             </Button>
-                          )}
+                            
+                            {key.isActive && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => resetDailyUsageMutation.mutate(key.id)}
+                                  disabled={resetDailyUsageMutation.isPending}
+                                  title="Reset Daily Usage"
+                                >
+                                  <RefreshCw className="h-4 w-4" />
+                                </Button>
+                                
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => revokeApiKeyMutation.mutate(key.id)}
+                                  disabled={revokeApiKeyMutation.isPending}
+                                  title="Revoke API Key"
+                                >
+                                  <Ban className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
