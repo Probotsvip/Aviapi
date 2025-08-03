@@ -2,16 +2,17 @@ import ytdl from "ytdl-core";
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
+import * as fsSync from "fs";
 import path from "path";
 import { randomBytes } from "crypto";
 import fetch from "node-fetch";
 
 const execAsync = promisify(exec);
 
-// Configuration for external API calls (as per user's existing code)
-const API_URL = process.env.API_URL || "https://api.cobalt.tools";
-const VIDEO_API_URL = process.env.VIDEO_API_URL || "https://api.cobalt.tools";
-const API_KEY = process.env.EXTERNAL_API_KEY || "";
+// Configuration for user's API server
+const API_URL = process.env.API_URL || "http://localhost:5000/api";
+const VIDEO_API_URL = process.env.VIDEO_API_URL || "http://localhost:5000/api";
+const API_KEY = process.env.API_KEY || "demo-api-key";
 
 interface VideoInfo {
   title: string;
@@ -48,10 +49,11 @@ class YouTubeService {
   private getCookieFile(): string | null {
     try {
       const cookieDir = path.join(process.cwd(), "cookies");
-      if (!require('fs').existsSync(cookieDir)) {
+      
+      if (!fsSync.existsSync(cookieDir)) {
         return null;
       }
-      const cookieFiles = require('fs').readdirSync(cookieDir).filter((f: string) => f.endsWith('.txt'));
+      const cookieFiles = fsSync.readdirSync(cookieDir).filter((f: string) => f.endsWith('.txt'));
       if (cookieFiles.length === 0) {
         return null;
       }
@@ -99,59 +101,56 @@ class YouTubeService {
     }
   }
 
-  // External API download methods (as per user's existing code)
+  // API download methods using user's server
   async downloadSongViaAPI(videoId: string): Promise<DownloadResult> {
     try {
       const filePath = path.join(this.downloadsDir, `${videoId}.mp3`);
       
-      // Check if file already exists
+      // Check if file already exists in local cache
       if (await this.fileExists(filePath)) {
-        console.log(`File already exists: ${filePath}`);
+        console.log(`File already exists in cache: ${filePath}`);
         const buffer = await fs.readFile(filePath);
         return { buffer, isDirect: true };
       }
 
-      if (!API_KEY) {
-        throw new Error("External API key not configured");
-      }
-
-      const songUrl = `${API_URL}/song/${videoId}?api=${API_KEY}`;
+      // Call our own API to trigger download and Telegram upload
+      const songUrl = `${API_URL}/song/${videoId}`;
+      console.log(`Calling song API: ${songUrl}`);
       
       // Poll API for download status
       for (let attempt = 0; attempt < 10; attempt++) {
-        const response = await fetch(songUrl);
+        const response = await fetch(songUrl, {
+          headers: {
+            'Authorization': `Bearer ${API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
         if (!response.ok) {
           throw new Error(`API request failed with status ${response.status}`);
         }
 
         const data = await response.json() as any;
-        const status = data.status?.toLowerCase();
+        console.log(`API Response attempt ${attempt + 1}:`, data);
 
-        if (status === "done") {
-          const downloadUrl = data.link;
-          if (!downloadUrl) {
-            throw new Error("API response did not provide a download URL");
-          }
-
-          // Download the file
-          const fileResponse = await fetch(downloadUrl);
-          const buffer = Buffer.from(await fileResponse.arrayBuffer());
-          
-          // Save to local cache
-          await fs.writeFile(filePath, buffer);
-          
-          return { buffer, isDirect: true };
-        } else if (status === "downloading") {
+        if (data.status === "completed" && data.downloadUrl) {
+          // File is uploaded to Telegram, return the Telegram URL for streaming
+          return { 
+            buffer: undefined, 
+            isDirect: false, 
+            filePath: data.downloadUrl // This will be the Telegram file URL
+          };
+        } else if (data.status === "processing") {
+          console.log("Still processing, waiting...");
           await new Promise(resolve => setTimeout(resolve, 4000));
-        } else {
-          const errorMsg = data.error || data.message || `Unexpected status '${status}'`;
-          throw new Error(`API error: ${errorMsg}`);
+        } else if (data.status === "failed") {
+          throw new Error(`Download failed: ${data.error || 'Unknown error'}`);
         }
       }
 
       throw new Error("Max retries reached. Still downloading...");
     } catch (error) {
-      console.error("External API song download failed:", error);
+      console.error("API song download failed:", error);
       return { isDirect: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -160,54 +159,51 @@ class YouTubeService {
     try {
       const filePath = path.join(this.downloadsDir, `${videoId}.mp4`);
       
-      // Check if file already exists
+      // Check if file already exists in local cache
       if (await this.fileExists(filePath)) {
-        console.log(`File already exists: ${filePath}`);
+        console.log(`File already exists in cache: ${filePath}`);
         const buffer = await fs.readFile(filePath);
         return { buffer, isDirect: true };
       }
 
-      if (!API_KEY) {
-        throw new Error("External API key not configured");
-      }
-
-      const videoUrl = `${VIDEO_API_URL}/video/${videoId}?api=${API_KEY}`;
+      // Call our own API to trigger download and Telegram upload
+      const videoUrl = `${VIDEO_API_URL}/video/${videoId}`;
+      console.log(`Calling video API: ${videoUrl}`);
       
       // Poll API for download status
       for (let attempt = 0; attempt < 10; attempt++) {
-        const response = await fetch(videoUrl);
+        const response = await fetch(videoUrl, {
+          headers: {
+            'Authorization': `Bearer ${API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
         if (!response.ok) {
           throw new Error(`API request failed with status ${response.status}`);
         }
 
         const data = await response.json() as any;
-        const status = data.status?.toLowerCase();
+        console.log(`API Response attempt ${attempt + 1}:`, data);
 
-        if (status === "done") {
-          const downloadUrl = data.link;
-          if (!downloadUrl) {
-            throw new Error("API response did not provide a download URL");
-          }
-
-          // Download the file
-          const fileResponse = await fetch(downloadUrl);
-          const buffer = Buffer.from(await fileResponse.arrayBuffer());
-          
-          // Save to local cache
-          await fs.writeFile(filePath, buffer);
-          
-          return { buffer, isDirect: true };
-        } else if (status === "downloading") {
+        if (data.status === "completed" && data.downloadUrl) {
+          // File is uploaded to Telegram, return the Telegram URL for streaming
+          return { 
+            buffer: undefined, 
+            isDirect: false, 
+            filePath: data.downloadUrl // This will be the Telegram file URL
+          };
+        } else if (data.status === "processing") {
+          console.log("Still processing, waiting...");
           await new Promise(resolve => setTimeout(resolve, 8000));
-        } else {
-          const errorMsg = data.error || data.message || `Unexpected status '${status}'`;
-          throw new Error(`API error: ${errorMsg}`);
+        } else if (data.status === "failed") {
+          throw new Error(`Download failed: ${data.error || 'Unknown error'}`);
         }
       }
 
       throw new Error("Max retries reached. Still downloading...");
     } catch (error) {
-      console.error("External API video download failed:", error);
+      console.error("API video download failed:", error);
       return { isDirect: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -223,17 +219,7 @@ class YouTubeService {
 
   async downloadAudio(videoId: string): Promise<Buffer | null> {
     try {
-      // Try external API first
-      console.log(`Attempting audio download via external API for ${videoId}`);
-      const apiResult = await this.downloadSongViaAPI(videoId);
-      if (apiResult.buffer) {
-        console.log(`Audio download successful via API: ${apiResult.buffer.length} bytes`);
-        return apiResult.buffer;
-      }
-      
-      console.log("API download failed, falling back to yt-dlp");
-      
-      // Fallback to yt-dlp with cookies
+      // Direct download with yt-dlp (no recursive API calls)
       const url = `https://www.youtube.com/watch?v=${videoId}`;
       const fileName = `audio_${videoId}_${randomBytes(4).toString('hex')}`;
       const outputPath = path.join(this.tempDir, fileName);
@@ -273,17 +259,7 @@ class YouTubeService {
 
   async downloadVideo(videoId: string, quality: string = "720p"): Promise<Buffer | null> {
     try {
-      // Try external API first
-      console.log(`Attempting video download via external API for ${videoId}`);
-      const apiResult = await this.downloadVideoViaAPI(videoId);
-      if (apiResult.buffer) {
-        console.log(`Video download successful via API: ${apiResult.buffer.length} bytes`);
-        return apiResult.buffer;
-      }
-
-      console.log("API download failed, falling back to yt-dlp");
-      
-      // Fallback to yt-dlp with cookies
+      // Direct download with yt-dlp (no recursive API calls)
       const url = `https://www.youtube.com/watch?v=${videoId}`;
       const fileName = `video_${videoId}_${randomBytes(4).toString('hex')}`;
       const outputPath = path.join(this.tempDir, fileName);
