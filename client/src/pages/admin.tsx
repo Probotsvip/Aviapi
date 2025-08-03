@@ -176,28 +176,47 @@ export default function AdminPanel() {
 
   // Test API endpoint
   const testApiEndpoint = async () => {
-    if (!testApiKey?.apiKey) {
-      toast({ title: "No test API key available", variant: "destructive" });
-      return;
-    }
-
+    console.log("Testing API endpoint...", { testApiKey, testUrl, testEndpoint, testFormat });
+    
     setIsTestLoading(true);
+    setTestResult(null);
+    
     try {
+      // Create default admin key if not available
+      let apiKey = testApiKey?.apiKey;
+      if (!apiKey) {
+        console.log("Creating admin test key...");
+        const keyResult = await apiRequest("/api/admin/test-api-key");
+        apiKey = keyResult.apiKey;
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/test-api-key"] });
+      }
+
+      if (!apiKey) {
+        throw new Error("Failed to get admin test API key");
+      }
+
+      console.log("Making test request...");
       const result = await apiRequest("/api/admin/test-endpoint", {
         method: "POST",
         body: JSON.stringify({
           endpoint: testEndpoint,
           youtubeUrl: testUrl,
           format: testFormat,
-          apiKey: testApiKey.apiKey,
+          apiKey: apiKey,
         }),
       });
 
+      console.log("Test result:", result);
       setTestResult(result);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/test-api-key"] });
-      toast({ title: "API test completed" });
-    } catch (error) {
-      toast({ title: "API test failed", variant: "destructive" });
+      toast({ title: "API test completed successfully" });
+    } catch (error: any) {
+      console.error("API test error:", error);
+      toast({ 
+        title: "API test failed", 
+        description: error.message || "Unknown error occurred",
+        variant: "destructive" 
+      });
     } finally {
       setIsTestLoading(false);
     }
@@ -846,8 +865,9 @@ export default function AdminPanel() {
 
                     <Button 
                       onClick={testApiEndpoint} 
-                      disabled={isTestLoading || !testApiKey}
+                      disabled={isTestLoading}
                       className="w-full"
+                      size="lg"
                     >
                       {isTestLoading ? (
                         <>

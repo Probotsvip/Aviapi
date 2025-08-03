@@ -3,6 +3,7 @@ export interface User {
   username: string;
   email: string;
   plan: string;
+  role?: string;
 }
 
 export function getUser(): User | null {

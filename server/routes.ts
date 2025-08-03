@@ -54,7 +54,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
       
       res.json({ 
-        user: { id: user.id, username: user.username, email: user.email, plan: user.plan },
+        user: { id: user.id, username: user.username, email: user.email, plan: user.plan, role: user.role },
         token 
       });
     } catch (error: any) {
@@ -79,7 +79,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
       
       res.json({ 
-        user: { id: user.id, username: user.username, email: user.email, plan: user.plan },
+        user: { id: user.id, username: user.username, email: user.email, plan: user.plan, role: user.role },
         token 
       });
     } catch (error: any) {
