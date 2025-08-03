@@ -155,7 +155,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           status: "done",
           title: cacheItem.title,
-          link: cacheItem.downloadUrl,
+          link: `/api/stream/${videoId}/${format}`,
           format: cacheItem.format,
           duration: cacheItem.duration || "Unknown"
         });
@@ -194,7 +194,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           status: "done",
           title: existingDownload.title,
-          link: existingDownload.downloadUrl,
+          link: `/api/stream/${videoId}/${format}`,
           format: existingDownload.format,
           duration: existingDownload.duration
         });
@@ -353,7 +353,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         status: "done",
         title: updatedDownload.title,
-        link: updatedDownload.downloadUrl,
+        link: `/api/stream/${videoId}/${format}`,
         format: updatedDownload.format,
         duration: updatedDownload.duration
       });
@@ -421,7 +421,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           status: "done",
           title: telegramResult.title,
-          link: telegramResult.download_url,
+          link: `/api/stream/${videoId}/mp4`,
           format: telegramResult.file_type === 'video' ? 'mp4' : 'mp3',
           duration: telegramResult.duration?.toString() || "Unknown"
         });
@@ -450,7 +450,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           status: "done",
           title: existingDownload.title,
-          link: existingDownload.downloadUrl,
+          link: `/api/stream/${videoId}/mp4`,
           format: existingDownload.format,
           quality,
           duration: existingDownload.duration,
@@ -511,7 +511,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         status: "done",
         title: updatedDownload.title,
-        link: updatedDownload.downloadUrl,
+        link: `/api/stream/${videoId}/mp4`,
         format: updatedDownload.format,
         quality,
         duration: updatedDownload.duration,
@@ -604,7 +604,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           title: download.title,
           format: download.format,
           duration: download.duration,
-          streamUrl: download.downloadUrl,
+          streamUrl: `/api/stream/${download.youtubeId}/${download.format}`,
           telegramUrl: `https://t.me/c/${process.env.TELEGRAM_CHANNEL_ID?.replace('-100', '')}/${download.telegramMessageId}`,
           metadata: {
             fileSize: download.fileSize,
@@ -641,7 +641,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           availableFormats: downloads.map(d => ({
             format: d.format,
             status: d.status,
-            streamUrl: d.downloadUrl,
+            streamUrl: `/api/stream/${videoId}/${d.format}`,
             telegramUrl: d.telegramMessageId ? 
               `https://t.me/c/${process.env.TELEGRAM_CHANNEL_ID?.replace('-100', '')}/${d.telegramMessageId}` : null,
             fileSize: d.fileSize,
@@ -687,7 +687,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           fileId: download.telegramFileId
         },
         urls: {
-          directStream: download.downloadUrl,
+          directStream: `/api/stream/${videoId}/${download.format}`,
           telegramMessage: `https://t.me/c/${process.env.TELEGRAM_CHANNEL_ID?.replace('-100', '')}/${download.telegramMessageId}`,
           apiEndpoint: `${req.protocol}://${req.get('host')}/api/${download.format === 'mp3' ? 'song' : 'video'}/${videoId}`
         },
@@ -801,6 +801,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
+
+  // Stream proxy endpoint for clean URLs (your domain proxy)
+  app.get("/api/stream/:videoId/:format", authenticateApiKey, async (req, res) => {
+    const startTime = Date.now();
+    try {
+      const { videoId, format } = req.params;
+      
+      // First check memory cache for fastest response
+      const cacheItem = fastCache.get(videoId, format);
+      if (cacheItem && cacheItem.downloadUrl) {
+        console.log(`🔄 [STREAM] Memory cache hit for ${videoId} - redirecting to Telegram`);
+        return res.redirect(302, cacheItem.downloadUrl);
+      }
+
+      // Check database for download URL
+      const existingDownload = await storage.getDownloadByYoutubeId(videoId, format);
+      if (existingDownload && existingDownload.downloadUrl) {
+        console.log(`🔄 [STREAM] Database hit for ${videoId} - redirecting to Telegram`);
+        
+        // Add to cache for next time
+        fastCache.set(videoId, format, {
+          title: existingDownload.title || "Unknown Title",
+          downloadUrl: existingDownload.downloadUrl,
+          format: existingDownload.format || format,
+          duration: existingDownload.duration || "Unknown",
+          timestamp: Date.now()
+        });
+        
+        // Track stream access
+        setImmediate(() => {
+          storage.createUsageStats({
+            userId: req.apiKey!.userId,
+            apiKeyId: req.apiKey!.id,
+            endpoint: "/stream",
+            responseTime: Date.now() - startTime,
+            statusCode: 302
+          }).catch(() => {});
+        });
+        
+        return res.redirect(302, existingDownload.downloadUrl);
+      }
+
+      console.log(`❌ [STREAM] File not found for ${videoId}.${format}`);
+      res.status(404).json({ error: "File not found. Please download first using /api/song or /api/video endpoints." });
+    } catch (error: any) {
+      console.error("Stream proxy error:", error);
+      res.status(500).json({ error: "Stream unavailable" });
+    }
+  });
+
+  // Admin routes
+  registerAdminRoutes(app, storage);
 
   const httpServer = createServer(app);
   return httpServer;
