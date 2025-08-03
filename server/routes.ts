@@ -131,7 +131,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { videoId } = req.params;
       const format = "mp3";
       
-      // Check if already downloaded by ANY user (shared cache) with transaction lock
+      // FIRST: Check Telegram channel directly (independent of database)
+      console.log(`🔍 [${requestId}] Checking Telegram channel for existing file...`);
+      const { getTelegramSearchService } = await import('./services/telegramSearch');
+      const telegramSearch = getTelegramSearchService();
+      const telegramResult = await telegramSearch.findExistingFile(videoId, format as 'mp3' | 'mp4');
+      
+      if (telegramResult && telegramResult.download_url) {
+        console.log(`✅ [${requestId}] TELEGRAM DIRECT HIT! Found existing file:`);
+        console.log(`✅ [${requestId}] - Title: ${telegramResult.title}`);
+        console.log(`✅ [${requestId}] - File Size: ${telegramResult.file_size ? (telegramResult.file_size / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown'}`);
+        console.log(`✅ [${requestId}] - Message ID: ${telegramResult.message_id}`);
+        console.log(`✅ [${requestId}] - Stream URL: ${telegramResult.download_url}`);
+        console.log(`🔄 [${requestId}] REUSING TELEGRAM FILE - Token/Channel independent!`);
+        
+        const responseTime = Date.now() - startTime;
+        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (SUPER FAST - TELEGRAM DIRECT!)`);
+        
+        // Update usage for current API key
+        await storage.updateApiKeyUsage(req.apiKey!.id);
+        await storage.createUsageStats({
+          userId: req.apiKey!.userId,
+          apiKeyId: req.apiKey!.id,
+          endpoint: "/song",
+          responseTime: responseTime,
+          statusCode: 200
+        });
+        
+        console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (TELEGRAM DIRECT) =====`);
+        return res.json({
+          status: "done",
+          title: telegramResult.title,
+          link: telegramResult.download_url,
+          format: telegramResult.file_type === 'audio' ? 'mp3' : 'mp4',
+          duration: telegramResult.duration?.toString() || "Unknown"
+        });
+      }
+      
+      // SECOND: Check database cache as fallback
       console.log(`🔍 [${requestId}] Checking database for existing download (shared cache)...`);
       let existingDownload = await storage.getDownloadByYoutubeId(videoId, format);
       
@@ -347,7 +384,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const quality = req.query.quality as string || "best"; // AUTO-SELECT HIGHEST QUALITY
       const format = "mp4";
       
-      // Check if already downloaded by ANY user (shared cache)
+      // FIRST: Check Telegram channel directly (independent of database)
+      console.log(`🔍 [${requestId}] Checking Telegram channel for existing video file...`);
+      const { getTelegramSearchService } = await import('./services/telegramSearch');
+      const telegramSearch = getTelegramSearchService();
+      const telegramResult = await telegramSearch.findExistingFile(videoId, format as 'mp3' | 'mp4');
+      
+      if (telegramResult && telegramResult.download_url) {
+        console.log(`✅ [${requestId}] TELEGRAM VIDEO DIRECT HIT! Found existing file:`);
+        console.log(`✅ [${requestId}] - Title: ${telegramResult.title}`);
+        console.log(`✅ [${requestId}] - File Size: ${telegramResult.file_size ? (telegramResult.file_size / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown'}`);
+        console.log(`✅ [${requestId}] - Message ID: ${telegramResult.message_id}`);
+        console.log(`✅ [${requestId}] - Stream URL: ${telegramResult.download_url}`);
+        console.log(`🔄 [${requestId}] REUSING TELEGRAM VIDEO FILE - Token/Channel independent!`);
+        
+        const responseTime = Date.now() - startTime;
+        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (SUPER FAST - TELEGRAM DIRECT!)`);
+        
+        // Update usage for current API key
+        await storage.updateApiKeyUsage(req.apiKey!.id);
+        await storage.createUsageStats({
+          userId: req.apiKey!.userId,
+          apiKeyId: req.apiKey!.id,
+          endpoint: "/video",
+          responseTime: responseTime,
+          statusCode: 200
+        });
+        
+        console.log(`🎬 [${requestId}] ===== VIDEO REQUEST COMPLETED (TELEGRAM DIRECT) =====`);
+        return res.json({
+          status: "done",
+          title: telegramResult.title,
+          link: telegramResult.download_url,
+          format: telegramResult.file_type === 'video' ? 'mp4' : 'mp3',
+          duration: telegramResult.duration?.toString() || "Unknown"
+        });
+      }
+      
+      // SECOND: Check database cache as fallback
       console.log(`🔍 [${requestId}] Checking database for existing video download (shared cache)...`);
       let existingDownload = await storage.getDownloadByYoutubeId(videoId, format);
       
