@@ -11,6 +11,7 @@ import { telegramService } from "./services/telegram";
 import { insertUserSchema, insertApiKeySchema } from "@shared/schema";
 import { z } from "zod";
 import { registerAdminRoutes } from "./routes/admin";
+import { fastCache } from "./cache";
 
 // Temporarily disable Stripe requirement for demo
 // if (!process.env.STRIPE_SECRET_KEY) {
@@ -131,69 +132,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { videoId } = req.params;
       const format = "mp3";
       
-      // FIRST: Check Telegram channel directly (independent of database)
-      console.log(`🔍 [${requestId}] Checking Telegram channel for existing file...`);
-      const { getTelegramSearchService } = await import('./services/telegramSearch');
-      const telegramSearch = getTelegramSearchService();
-      const telegramResult = await telegramSearch.findExistingFile(videoId, format as 'mp3' | 'mp4');
-      
-      if (telegramResult && telegramResult.download_url) {
-        console.log(`✅ [${requestId}] TELEGRAM DIRECT HIT! Found existing file:`);
-        console.log(`✅ [${requestId}] - Title: ${telegramResult.title}`);
-        console.log(`✅ [${requestId}] - File Size: ${telegramResult.file_size ? (telegramResult.file_size / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown'}`);
-        console.log(`✅ [${requestId}] - Message ID: ${telegramResult.message_id}`);
-        console.log(`✅ [${requestId}] - Stream URL: ${telegramResult.download_url}`);
-        console.log(`🔄 [${requestId}] REUSING TELEGRAM FILE - Token/Channel independent!`);
+      // FIRST: Check in-memory cache (ultra fast)
+      const cacheItem = fastCache.get(videoId, format);
+      if (cacheItem) {
+        console.log(`⚡ [${requestId}] MEMORY CACHE HIT! Ultra-fast response`);
         
         const responseTime = Date.now() - startTime;
-        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (SUPER FAST - TELEGRAM DIRECT!)`);
+        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (LIGHTNING FAST - MEMORY CACHE!)`);
         
-        // Update usage for current API key
-        await storage.updateApiKeyUsage(req.apiKey!.id);
-        await storage.createUsageStats({
-          userId: req.apiKey!.userId,
-          apiKeyId: req.apiKey!.id,
-          endpoint: "/song",
-          responseTime: responseTime,
-          statusCode: 200
-        });
+        // Update usage stats in background (non-blocking)
+        Promise.all([
+          storage.updateApiKeyUsage(req.apiKey!.id),
+          storage.createUsageStats({
+            userId: req.apiKey!.userId,
+            apiKeyId: req.apiKey!.id,
+            endpoint: "/song",
+            responseTime: responseTime,
+            statusCode: 200
+          })
+        ]).catch(err => console.error('Background stats update failed:', err));
         
-        console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (TELEGRAM DIRECT) =====`);
+        console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (MEMORY CACHE) =====`);
         return res.json({
           status: "done",
-          title: telegramResult.title,
-          link: telegramResult.download_url,
-          format: telegramResult.file_type === 'audio' ? 'mp3' : 'mp4',
-          duration: telegramResult.duration?.toString() || "Unknown"
+          title: cacheItem.title,
+          link: cacheItem.downloadUrl,
+          format: cacheItem.format,
+          duration: cacheItem.duration
         });
       }
-      
-      // SECOND: Check database cache as fallback
+
+      // SECOND: Check database cache with Telegram integration
       console.log(`🔍 [${requestId}] Checking database for existing download (shared cache)...`);
       let existingDownload = await storage.getDownloadByYoutubeId(videoId, format);
       
       if (existingDownload && existingDownload.status === "completed") {
-        console.log(`✅ [${requestId}] SHARED CACHE HIT! Found existing download:`);
+        console.log(`✅ [${requestId}] DATABASE CACHE HIT! Found existing download:`);
         console.log(`✅ [${requestId}] - Title: ${existingDownload.title}`);
         console.log(`✅ [${requestId}] - File Size: ${existingDownload.fileSize ? (existingDownload.fileSize / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown'}`);
-        console.log(`✅ [${requestId}] - Telegram Message: ${existingDownload.telegramMessageId}`);
         console.log(`✅ [${requestId}] - Stream URL: ${existingDownload.downloadUrl}`);
-        console.log(`🔄 [${requestId}] REUSING TELEGRAM FILE - Same file for all API keys!`);
         
         const responseTime = Date.now() - startTime;
-        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (SUPER FAST - SHARED CACHE!)`);
+        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (ULTRA FAST - DATABASE CACHE!)`);
         
-        // Update usage for current API key
-        await storage.updateApiKeyUsage(req.apiKey!.id);
-        await storage.createUsageStats({
-          userId: req.apiKey!.userId,
-          apiKeyId: req.apiKey!.id,
-          endpoint: "/song",
-          responseTime: responseTime,
-          statusCode: 200
+        // Add to memory cache for next time
+        fastCache.set(videoId, format, {
+          title: existingDownload.title,
+          downloadUrl: existingDownload.downloadUrl,
+          format: existingDownload.format,
+          duration: existingDownload.duration,
+          timestamp: Date.now()
         });
+
+        // Update usage stats in background (non-blocking)
+        Promise.all([
+          storage.updateApiKeyUsage(req.apiKey!.id),
+          storage.createUsageStats({
+            userId: req.apiKey!.userId,
+            apiKeyId: req.apiKey!.id,
+            endpoint: "/song",
+            responseTime: responseTime,
+            statusCode: 200
+          })
+        ]).catch(err => console.error('Background stats update failed:', err));
         
-        console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (SHARED CACHE) =====`);
+        console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (TELEGRAM CACHE) =====`);
         return res.json({
           status: "done",
           title: existingDownload.title,
@@ -340,6 +343,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         statusCode: 200
       });
       
+      // Add to memory cache for next time
+      fastCache.set(videoId, format, {
+        title: updatedDownload.title,
+        downloadUrl: updatedDownload.downloadUrl,
+        format: updatedDownload.format,
+        duration: updatedDownload.duration,
+        timestamp: Date.now()
+      });
+
       console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (NEW DOWNLOAD) =====`);
       console.log(`🎵 [${requestId}] Total processing time: ${totalTime}ms`);
       console.log(`🎵 [${requestId}] Final stream URL: ${updatedDownload.downloadUrl}`);
