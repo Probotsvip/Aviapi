@@ -15,6 +15,7 @@ TubeAPI is a YouTube content download API service that provides developers with 
 - ✅ User's existing API integration with external download services
 - ✅ Cookie-based fallback system for YouTube downloads
 - ✅ Telegram channel storage for downloaded files and streaming
+- ✅ Enhanced API key management with automatic expiry and daily limits
 - ⏳ Stripe payment integration (temporarily disabled for demo)
 
 # User Preferences

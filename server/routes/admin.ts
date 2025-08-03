@@ -135,7 +135,7 @@ export function registerAdminRoutes(app: Express) {
       const search = req.query.search as string;
       const offset = (page - 1) * limit;
 
-      let baseQuery = db.select({
+      let query = db.select({
         id: users.id,
         username: users.username,
         email: users.email,
@@ -147,8 +147,6 @@ export function registerAdminRoutes(app: Express) {
         apiKeyCount: sql<number>`(select count(*) from ${apiKeys} where user_id = ${users.id})`,
         downloadCount: sql<number>`(select count(*) from ${downloads} where user_id = ${users.id})`
       }).from(users);
-
-      let query = baseQuery;
 
       if (search) {
         query = query.where(sql`${users.username} ilike ${'%' + search + '%'} or ${users.email} ilike ${'%' + search + '%'}`);
@@ -378,6 +376,10 @@ export function registerAdminRoutes(app: Express) {
           isActive: apiKeys.isActive,
           usageCount: apiKeys.usageCount,
           usageLimit: apiKeys.usageLimit,
+          dailyLimit: apiKeys.dailyLimit,
+          dailyUsage: apiKeys.dailyUsage,
+          lastResetDate: apiKeys.lastResetDate,
+          expiresAt: apiKeys.expiresAt,
           lastUsed: apiKeys.lastUsed,
           createdAt: apiKeys.createdAt,
           userName: users.username,
@@ -394,6 +396,71 @@ export function registerAdminRoutes(app: Express) {
     } catch (error: any) {
       console.error("API keys error:", error);
       res.status(500).json({ message: "Failed to load API keys" });
+    }
+  });
+
+  // Create API Key for User
+  app.post("/api/admin/api-keys", authenticateUser, requireAdmin, async (req, res) => {
+    try {
+      const { userId, name, usageLimit, dailyLimit, expiresAt } = req.body;
+      
+      if (!userId || !name) {
+        return res.status(400).json({ message: "User ID and name are required" });
+      }
+
+      // Check if user exists
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Generate unique API key
+      const apiKey = `sk_${Date.now()}_${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`;
+
+      // Set default expiry (30 days from now) if not provided
+      const defaultExpiry = new Date();
+      defaultExpiry.setDate(defaultExpiry.getDate() + 30);
+
+      const [newApiKey] = await db
+        .insert(apiKeys)
+        .values({
+          userId,
+          key: apiKey,
+          name,
+          usageLimit: usageLimit || 1000,
+          dailyLimit: dailyLimit || 100,
+          expiresAt: expiresAt ? new Date(expiresAt) : defaultExpiry,
+          isActive: true
+        })
+        .returning();
+
+      await logAdminAction(
+        req.user!.id,
+        "api_key_created",
+        "api_key",
+        newApiKey.id,
+        { 
+          forUser: user.username,
+          name,
+          usageLimit: usageLimit || 1000,
+          dailyLimit: dailyLimit || 100,
+          expiresAt: expiresAt || defaultExpiry.toISOString()
+        },
+        req.ip
+      );
+
+      res.json({ 
+        apiKey: {
+          ...newApiKey,
+          userName: user.username,
+          userEmail: user.email
+        },
+        message: "API key created successfully"
+      });
+
+    } catch (error: any) {
+      console.error("API key creation error:", error);
+      res.status(500).json({ message: "Failed to create API key" });
     }
   });
 
@@ -443,8 +510,10 @@ export function registerAdminRoutes(app: Express) {
             userId: req.user!.id,
             key: testKey,
             name: "Admin Test Key",
-            usageLimit: 10000, // 10k daily requests
+            usageLimit: 10000,
+            dailyLimit: 10000, // 10k daily requests
             usageCount: 0,
+            dailyUsage: 0,
             isActive: true,
           })
           .returning();

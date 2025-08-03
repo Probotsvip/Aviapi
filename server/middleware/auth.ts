@@ -54,9 +54,33 @@ export async function authenticateApiKey(req: Request, res: Response, next: Next
       return res.status(401).json({ error: "API key is deactivated" });
     }
     
-    // Check usage limit
+    // Check if API key has expired
+    if (key.expiresAt && new Date() > new Date(key.expiresAt)) {
+      return res.status(401).json({ error: "API key has expired" });
+    }
+    
+    // Check monthly usage limit
     if ((key.usageCount || 0) >= (key.usageLimit || 0)) {
-      return res.status(429).json({ error: "API key usage limit exceeded" });
+      return res.status(429).json({ error: "Monthly API key usage limit exceeded" });
+    }
+    
+    // Check if daily limit needs reset
+    const now = new Date();
+    const lastReset = key.lastResetDate ? new Date(key.lastResetDate) : new Date();
+    const shouldReset = now.getDate() !== lastReset.getDate() || 
+                       now.getMonth() !== lastReset.getMonth() || 
+                       now.getFullYear() !== lastReset.getFullYear();
+    
+    if (shouldReset) {
+      // Reset daily usage
+      await storage.resetDailyUsage(key.id);
+      key.dailyUsage = 0;
+      key.lastResetDate = now;
+    }
+    
+    // Check daily usage limit
+    if ((key.dailyUsage || 0) >= (key.dailyLimit || 100)) {
+      return res.status(429).json({ error: "Daily API key usage limit exceeded" });
     }
     
     req.apiKey = key;

@@ -27,6 +27,10 @@ export const apiKeys = pgTable("api_keys", {
   isActive: boolean("is_active").default(true),
   usageCount: integer("usage_count").default(0),
   usageLimit: integer("usage_limit").default(1000), // monthly limit
+  dailyLimit: integer("daily_limit").default(100), // daily request limit
+  dailyUsage: integer("daily_usage").default(0), // current daily usage
+  lastResetDate: timestamp("last_reset_date").defaultNow(), // for daily reset tracking
+  expiresAt: timestamp("expires_at"), // API key expiration date
   lastUsed: timestamp("last_used"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -117,6 +121,8 @@ export const insertUserSchema = createInsertSchema(users).pick({
 export const insertApiKeySchema = createInsertSchema(apiKeys).pick({
   name: true,
   usageLimit: true,
+  dailyLimit: true,
+  expiresAt: true,
 });
 
 export const insertDownloadSchema = createInsertSchema(downloads).pick({

@@ -85,6 +85,10 @@ interface ApiKey {
   isActive: boolean;
   usageCount: number;
   usageLimit: number;
+  dailyLimit: number;
+  dailyUsage: number;
+  lastResetDate: string | null;
+  expiresAt: string | null;
   lastUsed: string | null;
   createdAt: string;
   userName: string;
@@ -181,6 +185,22 @@ export default function AdminPanel() {
     },
   });
 
+  // API Key creation mutation
+  const createApiKeyMutation = useMutation({
+    mutationFn: (data: { userId: string; name: string; usageLimit?: number; dailyLimit?: number; expiresAt?: string }) =>
+      apiRequest("/api/admin/api-keys", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/api-keys"] });
+      toast({ title: "API key created successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to create API key", variant: "destructive" });
+    },
+  });
+
   // API Key revoke mutation
   const revokeApiKeyMutation = useMutation({
     mutationFn: (keyId: string) =>
@@ -253,6 +273,117 @@ export default function AdminPanel() {
       toast({ title: "Failed to reset test key", variant: "destructive" });
     },
   });
+
+  // Create API Key Form Component
+  const CreateApiKeyFormContent = ({ users, onSubmit, isLoading }: {
+    users: User[];
+    onSubmit: (data: { userId: string; name: string; usageLimit?: number; dailyLimit?: number; expiresAt?: string }) => void;
+    isLoading: boolean;
+  }) => {
+    const [selectedUserId, setSelectedUserId] = useState("");
+    const [keyName, setKeyName] = useState("");
+    const [monthlyLimit, setMonthlyLimit] = useState("1000");
+    const [dailyLimit, setDailyLimit] = useState("100");
+    const [expiryDate, setExpiryDate] = useState("");
+
+    const handleSubmit = () => {
+      if (!selectedUserId || !keyName) {
+        toast({ title: "Please fill in all required fields", variant: "destructive" });
+        return;
+      }
+
+      onSubmit({
+        userId: selectedUserId,
+        name: keyName,
+        usageLimit: parseInt(monthlyLimit) || 1000,
+        dailyLimit: parseInt(dailyLimit) || 100,
+        expiresAt: expiryDate || undefined
+      });
+
+      // Reset form
+      setSelectedUserId("");
+      setKeyName("");
+      setMonthlyLimit("1000");
+      setDailyLimit("100");
+      setExpiryDate("");
+    };
+
+    return (
+      <div className="space-y-4">
+        <div>
+          <Label htmlFor="user-select">Select User</Label>
+          <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Choose user..." />
+            </SelectTrigger>
+            <SelectContent>
+              {users.map((user) => (
+                <SelectItem key={user.id} value={user.id}>
+                  {user.username} ({user.email})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        
+        <div>
+          <Label htmlFor="api-key-name">API Key Name</Label>
+          <Input 
+            id="api-key-name"
+            value={keyName}
+            onChange={(e) => setKeyName(e.target.value)}
+            placeholder="e.g., Production API Key"
+          />
+        </div>
+        
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="monthly-limit">Monthly Limit</Label>
+            <Input 
+              id="monthly-limit"
+              type="number"
+              value={monthlyLimit}
+              onChange={(e) => setMonthlyLimit(e.target.value)}
+              placeholder="1000"
+            />
+          </div>
+          <div>
+            <Label htmlFor="daily-limit">Daily Limit</Label>
+            <Input 
+              id="daily-limit"
+              type="number"
+              value={dailyLimit}
+              onChange={(e) => setDailyLimit(e.target.value)}
+              placeholder="100"
+            />
+          </div>
+        </div>
+        
+        <div>
+          <Label htmlFor="expiry-date">Expiry Date (Optional)</Label>
+          <Input 
+            id="expiry-date"
+            type="date"
+            value={expiryDate}
+            onChange={(e) => setExpiryDate(e.target.value)}
+            min={new Date().toISOString().split('T')[0]}
+          />
+        </div>
+        
+        <div className="flex justify-end space-x-2">
+          <DialogTrigger asChild>
+            <Button variant="outline">Cancel</Button>
+          </DialogTrigger>
+          <Button 
+            onClick={handleSubmit}
+            disabled={isLoading}
+          >
+            {isLoading ? "Creating..." : "Create API Key"}
+          </Button>
+        </div>
+      </div>
+    );
+  };
 
   const StatCard = ({ title, value, description, icon: Icon, trend }: any) => (
     <Card>
@@ -621,9 +752,33 @@ export default function AdminPanel() {
 
           {/* API Keys Tab */}
           <TabsContent value="api-keys" className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold">API Key Management</h2>
-              <p className="text-muted-foreground">Monitor and manage API keys across the system</p>
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold">API Key Management</h2>
+                <p className="text-muted-foreground">Monitor and manage API keys across the system</p>
+              </div>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Key className="h-4 w-4 mr-2" />
+                    Create API Key
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Create New API Key</DialogTitle>
+                    <DialogDescription>
+                      Generate a new API key for a user with custom limits and expiry date.
+                    </DialogDescription>
+                  </DialogHeader>
+                  
+                  <CreateApiKeyFormContent 
+                    users={usersData?.users || []}
+                    onSubmit={(data: any) => createApiKeyMutation.mutate(data)}
+                    isLoading={createApiKeyMutation.isPending}
+                  />
+                </DialogContent>
+              </Dialog>
             </div>
 
             <Card>
@@ -658,16 +813,34 @@ export default function AdminPanel() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="space-y-1">
-                            <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-primary transition-all"
-                                style={{ width: `${Math.min((key.usageCount / key.usageLimit) * 100, 100)}%` }}
-                              />
+                          <div className="space-y-2">
+                            <div>
+                              <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-primary transition-all"
+                                  style={{ width: `${Math.min((key.usageCount / key.usageLimit) * 100, 100)}%` }}
+                                />
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                Monthly: {key.usageCount}/{key.usageLimit}
+                              </p>
                             </div>
-                            <p className="text-xs text-muted-foreground">
-                              {key.usageCount}/{key.usageLimit}
-                            </p>
+                            <div>
+                              <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-blue-500 transition-all"
+                                  style={{ width: `${Math.min((key.dailyUsage / key.dailyLimit) * 100, 100)}%` }}
+                                />
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                Daily: {key.dailyUsage}/{key.dailyLimit}
+                              </p>
+                            </div>
+                            {key.expiresAt && (
+                              <p className="text-xs text-orange-600">
+                                Expires: {new Date(key.expiresAt).toLocaleDateString()}
+                              </p>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>

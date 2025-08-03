@@ -17,6 +17,7 @@ export interface IStorage {
   getUserApiKeys(userId: string): Promise<ApiKey[]>;
   createApiKey(userId: string, apiKey: InsertApiKey): Promise<ApiKey>;
   updateApiKeyUsage(keyId: string): Promise<void>;
+  resetDailyUsage(keyId: string): Promise<void>;
   deactivateApiKey(keyId: string): Promise<void>;
 
   // Download methods
@@ -103,7 +104,18 @@ export class DatabaseStorage implements IStorage {
       .update(apiKeys)
       .set({ 
         usageCount: sql`${apiKeys.usageCount} + 1`,
+        dailyUsage: sql`${apiKeys.dailyUsage} + 1`,
         lastUsed: new Date()
+      })
+      .where(eq(apiKeys.id, keyId));
+  }
+
+  async resetDailyUsage(keyId: string): Promise<void> {
+    await db
+      .update(apiKeys)
+      .set({ 
+        dailyUsage: 0,
+        lastResetDate: new Date()
       })
       .where(eq(apiKeys.id, keyId));
   }
