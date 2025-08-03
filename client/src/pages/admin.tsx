@@ -39,6 +39,7 @@ import { Separator } from "@/components/ui/separator";
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from 'recharts';
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { getUser } from "@/lib/auth";
 
 interface AdminStats {
   summary: {
@@ -114,6 +115,25 @@ export default function AdminPanel() {
   const [isTestLoading, setIsTestLoading] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Check if user is admin
+  const user = getUser();
+  
+  // Show login if not authenticated as admin
+  if (!user || user.role !== 'admin') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center space-y-4">
+          <h1 className="text-2xl font-bold">Admin Access Required</h1>
+          <p className="text-muted-foreground">Please login with admin credentials</p>
+          <div className="space-y-2">
+            <Button onClick={() => setLocation('/login')}>Go to Login</Button>
+            <p className="text-xs text-muted-foreground">Admin: admin@tubeapi.dev / admin123</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Dashboard stats query
   const { data: stats, isLoading: statsLoading } = useQuery<AdminStats>({

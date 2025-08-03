@@ -20,12 +20,10 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const response = await apiRequest("POST", "/api/auth/login", {
-        email,
-        password,
+      const data = await apiRequest("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
       });
-      
-      const data = await response.json();
       setAuth(data.user, data.token);
       
       toast({
@@ -33,7 +31,12 @@ export default function Login() {
         description: "You have been logged in successfully.",
       });
       
-      setLocation("/dashboard");
+      // Redirect admin users to admin panel
+      if (data.user.role === 'admin') {
+        setLocation("/admin");
+      } else {
+        setLocation("/dashboard");
+      }
     } catch (error: any) {
       toast({
         title: "Login Failed",
