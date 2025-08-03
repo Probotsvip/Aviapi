@@ -171,7 +171,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ error: "Download failed" });
       }
       
-      const telegramFile = await telegramService.uploadAudio(audioBuffer, videoInfo.title);
+      const telegramFile = await telegramService.uploadAudio(audioBuffer, videoInfo.title, videoId, videoInfo.duration);
       if (!telegramFile) {
         await storage.updateDownload(download.id, { status: "failed" });
         return res.status(500).json({ error: "Upload to Telegram failed" });
@@ -275,7 +275,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ error: "Download failed" });
       }
       
-      const telegramFile = await telegramService.uploadVideo(videoBuffer, videoInfo.title);
+      const telegramFile = await telegramService.uploadVideo(videoBuffer, videoInfo.title, videoId, videoInfo.duration);
       if (!telegramFile) {
         await storage.updateDownload(download.id, { status: "failed" });
         return res.status(500).json({ error: "Upload to Telegram failed" });
@@ -373,12 +373,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Search endpoint for Telegram channel content
+  app.get("/api/search", authenticateApiKey, async (req, res) => {
+    try {
+      const { query, type } = req.query;
+      
+      if (!query) {
+        return res.status(400).json({ error: "Search query required" });
+      }
+
+      // Search in database for uploaded content
+      const downloads = await storage.searchDownloads(
+        query as string, 
+        type as 'audio' | 'video' | undefined
+      );
+
+      res.json({
+        success: true,
+        query: query,
+        type: type || "all",
+        results: downloads.map(download => ({
+          videoId: download.youtubeId,
+          title: download.title,
+          format: download.format,
+          duration: download.duration,
+          streamUrl: download.downloadUrl,
+          telegramUrl: `https://t.me/c/${process.env.TELEGRAM_CHANNEL_ID?.replace('-100', '')}/${download.telegramMessageId}`,
+          metadata: {
+            fileSize: download.fileSize,
+            uploadedAt: download.createdAt,
+            streamType: download.format === 'mp3' ? 'audio' : 'video'
+          }
+        }))
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get enhanced metadata for a specific video
+  app.get("/api/metadata/:videoId", authenticateApiKey, async (req, res) => {
+    try {
+      const { videoId } = req.params;
+      
+      // Get all formats for this video
+      const downloads = await storage.getDownloadsByYoutubeId(videoId);
+      const videoInfo = await youtubeService.getVideoInfo(videoId);
+
+      if (!videoInfo) {
+        return res.status(404).json({ error: "Video not found" });
+      }
+
+      res.json({
+        success: true,
+        videoId,
+        metadata: {
+          title: videoInfo.title,
+          duration: videoInfo.duration,
+          thumbnail: videoInfo.thumbnail,
+          availableFormats: downloads.map(d => ({
+            format: d.format,
+            status: d.status,
+            streamUrl: d.downloadUrl,
+            telegramUrl: d.telegramMessageId ? 
+              `https://t.me/c/${process.env.TELEGRAM_CHANNEL_ID?.replace('-100', '')}/${d.telegramMessageId}` : null,
+            fileSize: d.fileSize,
+            uploadedAt: d.createdAt
+          }))
+        },
+        telegram: {
+          channelId: process.env.TELEGRAM_CHANNEL_ID,
+          searchTags: [`#${videoId}`, "#TubeAPI", "#StreamReady"]
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Test endpoint for Telegram connectivity
   app.get("/api/test/telegram", async (req, res) => {
     try {
       // Test with a small dummy file
       const testBuffer = Buffer.from("Test audio file for TubeAPI");
-      const result = await telegramService.uploadAudio(testBuffer, "TubeAPI Test Audio");
+      const result = await telegramService.uploadAudio(testBuffer, "TubeAPI Test Audio", "test_video_id", "0:10");
       
       if (result) {
         res.json({

@@ -1,6 +1,6 @@
 import { users, apiKeys, downloads, usageStats, type User, type InsertUser, type ApiKey, type InsertApiKey, type Download, type InsertDownload, type UsageStats } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, like, or } from "drizzle-orm";
 import { randomBytes } from "crypto";
 
 export interface IStorage {
@@ -25,6 +25,8 @@ export interface IStorage {
   getDownload(id: string): Promise<Download | undefined>;
   getUserDownloads(userId: string): Promise<Download[]>;
   getDownloadByYoutubeId(youtubeId: string, format: string): Promise<Download | undefined>;
+  getDownloadsByYoutubeId(youtubeId: string): Promise<Download[]>;
+  searchDownloads(query: string, type?: 'audio' | 'video'): Promise<Download[]>;
 
   // Usage stats methods
   createUsageStats(stats: Partial<Omit<UsageStats, "id" | "createdAt">> & { userId?: string; apiKeyId?: string; endpoint?: string; responseTime?: number; statusCode?: number }): Promise<UsageStats>;
@@ -146,6 +148,39 @@ export class DatabaseStorage implements IStorage {
         eq(downloads.status, "completed")
       ));
     return download || undefined;
+  }
+
+  async getDownloadsByYoutubeId(youtubeId: string): Promise<Download[]> {
+    return db
+      .select()
+      .from(downloads)
+      .where(and(
+        eq(downloads.youtubeId, youtubeId),
+        eq(downloads.status, "completed")
+      ))
+      .orderBy(desc(downloads.createdAt));
+  }
+
+  async searchDownloads(query: string, type?: 'audio' | 'video'): Promise<Download[]> {
+    let conditions = [
+      eq(downloads.status, "completed"),
+      or(
+        like(downloads.title, `%${query}%`),
+        like(downloads.youtubeId, `%${query}%`)
+      )
+    ];
+
+    if (type) {
+      const format = type === 'audio' ? 'mp3' : 'mp4';
+      conditions.push(eq(downloads.format, format));
+    }
+
+    return db
+      .select()
+      .from(downloads)
+      .where(and(...conditions))
+      .orderBy(desc(downloads.createdAt))
+      .limit(50);
   }
 
   async createUsageStats(stats: Partial<Omit<UsageStats, "id" | "createdAt">> & { userId?: string; apiKeyId?: string; endpoint?: string; responseTime?: number; statusCode?: number }): Promise<UsageStats> {
