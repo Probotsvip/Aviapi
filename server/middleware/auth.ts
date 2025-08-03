@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-const JWT_SECRET = process.env.JWT_SECRET!;
+const JWT_SECRET = process.env.JWT_SECRET || 'demo-jwt-secret-key-for-development-only';
 
 export async function authenticateUser(req: Request, res: Response, next: NextFunction) {
   try {
