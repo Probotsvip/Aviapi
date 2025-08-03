@@ -7,6 +7,7 @@ import Home from "@/pages/home";
 import Login from "@/pages/login";
 import Register from "@/pages/register";
 import Dashboard from "@/pages/dashboard";
+import AdminPanel from "@/pages/admin";
 import Pricing from "@/pages/pricing";
 import Docs from "@/pages/docs";
 import Checkout from "@/pages/checkout";
@@ -22,6 +23,7 @@ function Router() {
         <Route path="/login" component={Login} />
         <Route path="/register" component={Register} />
         <Route path="/dashboard" component={Dashboard} />
+        <Route path="/admin" component={AdminPanel} />
         <Route path="/pricing" component={Pricing} />
         <Route path="/docs" component={Docs} />
         <Route path="/checkout/:plan" component={Checkout} />

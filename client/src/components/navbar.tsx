@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { getUser, logout } from "@/lib/auth";
-import { Download, User, LogOut, Menu } from "lucide-react";
+import { Download, User, LogOut, Menu, Shield } from "lucide-react";
 
 export default function Navbar() {
   const [location] = useLocation();
@@ -47,6 +47,14 @@ export default function Navbar() {
                     <span className="hidden sm:inline">{user.username}</span>
                   </Button>
                 </Link>
+                {user?.role === 'admin' && (
+                  <Link href="/admin">
+                    <Button variant="outline" size="sm" className="flex items-center space-x-2">
+                      <Shield className="h-4 w-4" />
+                      <span className="hidden sm:inline">Admin</span>
+                    </Button>
+                  </Link>
+                )}
                 <Button variant="ghost" size="sm" onClick={handleLogout} className="flex items-center space-x-2">
                   <LogOut className="h-4 w-4" />
                   <span className="hidden sm:inline">Logout</span>

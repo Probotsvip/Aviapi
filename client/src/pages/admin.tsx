@@ -1,0 +1,706 @@
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link, useLocation } from "wouter";
+import { 
+  Users, 
+  Key, 
+  Download, 
+  BarChart3, 
+  Shield, 
+  Settings, 
+  Activity,
+  TrendingUp,
+  Clock,
+  Database,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Eye,
+  Ban,
+  UserCheck,
+  FileText,
+  Calendar,
+  Filter,
+  Search,
+  RefreshCw,
+  Crown
+} from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+// import { Progress } from "@/components/ui/progress";
+import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from 'recharts';
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+
+interface AdminStats {
+  summary: {
+    totalUsers: number;
+    totalApiKeys: number;
+    totalDownloads: number;
+    weeklyDownloads: number;
+    monthlyRevenue: number;
+    systemUptime: number;
+  };
+  metrics: {
+    errorRate: string;
+    avgResponseTime: number;
+    successRate: string;
+  };
+  recentActivity: Array<{
+    id: string;
+    title: string;
+    format: string;
+    status: string;
+    user: string;
+    timestamp: string;
+  }>;
+}
+
+interface User {
+  id: string;
+  username: string;
+  email: string;
+  plan: string;
+  role: string;
+  isActive: boolean;
+  lastLogin: string | null;
+  createdAt: string;
+  apiKeyCount: number;
+  downloadCount: number;
+}
+
+interface ApiKey {
+  id: string;
+  key: string;
+  name: string;
+  isActive: boolean;
+  usageCount: number;
+  usageLimit: number;
+  lastUsed: string | null;
+  createdAt: string;
+  userName: string;
+  userEmail: string;
+}
+
+export default function AdminPanel() {
+  const [location, setLocation] = useLocation();
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [userPage, setUserPage] = useState(1);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  // Dashboard stats query
+  const { data: stats, isLoading: statsLoading } = useQuery<AdminStats>({
+    queryKey: ["/api/admin/dashboard"],
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+
+  // Users query
+  const { data: usersData, isLoading: usersLoading } = useQuery({
+    queryKey: ["/api/admin/users", userPage, searchQuery],
+    queryFn: () => apiRequest(`/api/admin/users?page=${userPage}&search=${searchQuery}`),
+  });
+
+  // API Keys query
+  const { data: apiKeysData } = useQuery({
+    queryKey: ["/api/admin/api-keys"],
+  });
+
+  // Analytics query
+  const { data: analytics } = useQuery({
+    queryKey: ["/api/admin/analytics"],
+    queryFn: () => apiRequest("/api/admin/analytics?days=30"),
+  });
+
+  // User update mutation
+  const updateUserMutation = useMutation({
+    mutationFn: ({ userId, data }: { userId: string; data: any }) =>
+      apiRequest(`/api/admin/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      toast({ title: "User updated successfully" });
+      setSelectedUser(null);
+    },
+    onError: () => {
+      toast({ title: "Failed to update user", variant: "destructive" });
+    },
+  });
+
+  // API Key revoke mutation
+  const revokeApiKeyMutation = useMutation({
+    mutationFn: (keyId: string) =>
+      apiRequest(`/api/admin/api-keys/${keyId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/api-keys"] });
+      toast({ title: "API key revoked successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to revoke API key", variant: "destructive" });
+    },
+  });
+
+  const StatCard = ({ title, value, description, icon: Icon, trend }: any) => (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <Icon className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{value}</div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+        {trend && (
+          <div className={`text-xs flex items-center mt-1 ${trend > 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <TrendingUp className="h-3 w-3 mr-1" />
+            {trend > 0 ? '+' : ''}{trend}% from last week
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const UserDialog = () => (
+    <Dialog open={!!selectedUser} onOpenChange={() => setSelectedUser(null)}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserCheck className="h-5 w-5" />
+            User Management - {selectedUser?.username}
+          </DialogTitle>
+          <DialogDescription>
+            Manage user permissions, plan, and account status
+          </DialogDescription>
+        </DialogHeader>
+        
+        {selectedUser && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="plan">Plan</Label>
+                <Select
+                  value={selectedUser.plan}
+                  onValueChange={(value) => setSelectedUser({...selectedUser, plan: value})}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="free">Free</SelectItem>
+                    <SelectItem value="starter">Starter</SelectItem>
+                    <SelectItem value="pro">Pro</SelectItem>
+                    <SelectItem value="enterprise">Enterprise</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label htmlFor="role">Role</Label>
+                <Select
+                  value={selectedUser.role}
+                  onValueChange={(value) => setSelectedUser({...selectedUser, role: value})}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user">User</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="super_admin">Super Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="isActive"
+                checked={selectedUser.isActive}
+                onChange={(e) => setSelectedUser({...selectedUser, isActive: e.target.checked})}
+                className="w-4 h-4"
+              />
+              <Label htmlFor="isActive">Account Active</Label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <strong>Email:</strong> {selectedUser.email}
+              </div>
+              <div>
+                <strong>Created:</strong> {new Date(selectedUser.createdAt).toLocaleDateString()}
+              </div>
+              <div>
+                <strong>API Keys:</strong> {selectedUser.apiKeyCount}
+              </div>
+              <div>
+                <strong>Downloads:</strong> {selectedUser.downloadCount}
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2">
+              <Button variant="outline" onClick={() => setSelectedUser(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => updateUserMutation.mutate({
+                  userId: selectedUser.id,
+                  data: {
+                    plan: selectedUser.plan,
+                    role: selectedUser.role,
+                    isActive: selectedUser.isActive
+                  }
+                })}
+                disabled={updateUserMutation.isPending}
+              >
+                {updateUserMutation.isPending ? "Updating..." : "Update User"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <div className="border-b">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <Crown className="h-8 w-8 text-primary" />
+              <div>
+                <h1 className="text-2xl font-bold">TubeAPI Admin Panel</h1>
+                <p className="text-muted-foreground">Advanced system management and analytics</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Badge variant="outline" className="flex items-center gap-1">
+                <Activity className="h-3 w-3" />
+                System Healthy
+              </Badge>
+              <Button variant="outline" size="sm">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="container mx-auto px-4 py-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-6">
+            <TabsTrigger value="dashboard" className="flex items-center gap-2">
+              <BarChart3 className="h-4 w-4" />
+              Dashboard
+            </TabsTrigger>
+            <TabsTrigger value="users" className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Users
+            </TabsTrigger>
+            <TabsTrigger value="api-keys" className="flex items-center gap-2">
+              <Key className="h-4 w-4" />
+              API Keys
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4" />
+              Analytics
+            </TabsTrigger>
+            <TabsTrigger value="downloads" className="flex items-center gap-2">
+              <Download className="h-4 w-4" />
+              Downloads
+            </TabsTrigger>
+            <TabsTrigger value="system" className="flex items-center gap-2">
+              <Settings className="h-4 w-4" />
+              System
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Dashboard Tab */}
+          <TabsContent value="dashboard" className="space-y-6">
+            {statsLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {[...Array(8)].map((_, i) => (
+                  <Card key={i} className="animate-pulse">
+                    <CardHeader>
+                      <div className="h-4 bg-muted rounded w-3/4"></div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="h-8 bg-muted rounded w-1/2 mb-2"></div>
+                      <div className="h-3 bg-muted rounded w-full"></div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  <StatCard
+                    title="Total Users"
+                    value={stats?.summary.totalUsers || 0}
+                    description="Registered users"
+                    icon={Users}
+                  />
+                  <StatCard
+                    title="Active API Keys"
+                    value={stats?.summary.totalApiKeys || 0}
+                    description="Currently active"
+                    icon={Key}
+                  />
+                  <StatCard
+                    title="Total Downloads"
+                    value={stats?.summary.totalDownloads || 0}
+                    description="All time downloads"
+                    icon={Download}
+                  />
+                  <StatCard
+                    title="Weekly Downloads"
+                    value={stats?.summary.weeklyDownloads || 0}
+                    description="Last 7 days"
+                    icon={Calendar}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <StatCard
+                    title="Success Rate"
+                    value={`${stats?.metrics.successRate || 100}%`}
+                    description="Last 7 days"
+                    icon={CheckCircle}
+                  />
+                  <StatCard
+                    title="Avg Response Time"
+                    value={`${stats?.metrics.avgResponseTime || 0}ms`}
+                    description="System performance"
+                    icon={Clock}
+                  />
+                  <StatCard
+                    title="System Uptime"
+                    value={`${stats?.summary.systemUptime || 0}h`}
+                    description="Current session"
+                    icon={Activity}
+                  />
+                </div>
+
+                {/* Recent Activity */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Activity className="h-5 w-5" />
+                      Recent Activity
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {stats?.recentActivity.map((activity) => (
+                        <div key={activity.id} className="flex items-center justify-between p-3 border rounded-lg">
+                          <div className="flex items-center space-x-3">
+                            <Badge variant={activity.status === 'completed' ? 'default' : 'secondary'}>
+                              {activity.format}
+                            </Badge>
+                            <div>
+                              <p className="font-medium">{activity.title}</p>
+                              <p className="text-sm text-muted-foreground">by {activity.user}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <Badge variant={activity.status === 'completed' ? 'default' : 'destructive'}>
+                              {activity.status}
+                            </Badge>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {new Date(activity.timestamp).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </TabsContent>
+
+          {/* Users Tab */}
+          <TabsContent value="users" className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold">User Management</h2>
+                <p className="text-muted-foreground">Manage user accounts, permissions, and plans</p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Input
+                  placeholder="Search users..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-64"
+                />
+                <Button variant="outline">
+                  <Search className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <Card>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>User</TableHead>
+                      <TableHead>Plan</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>API Keys</TableHead>
+                      <TableHead>Downloads</TableHead>
+                      <TableHead>Joined</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {usersData?.users?.map((user: User) => (
+                      <TableRow key={user.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{user.username}</p>
+                            <p className="text-sm text-muted-foreground">{user.email}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={user.plan === 'free' ? 'secondary' : 'default'}>
+                            {user.plan}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={user.role === 'admin' ? 'destructive' : 'outline'}>
+                            {user.role}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={user.isActive ? 'default' : 'destructive'}>
+                            {user.isActive ? 'Active' : 'Inactive'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{user.apiKeyCount}</TableCell>
+                        <TableCell>{user.downloadCount}</TableCell>
+                        <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedUser(user)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* API Keys Tab */}
+          <TabsContent value="api-keys" className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold">API Key Management</h2>
+              <p className="text-muted-foreground">Monitor and manage API keys across the system</p>
+            </div>
+
+            <Card>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Key Name</TableHead>
+                      <TableHead>User</TableHead>
+                      <TableHead>Usage</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Last Used</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {apiKeysData?.apiKeys?.map((key: ApiKey) => (
+                      <TableRow key={key.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{key.name}</p>
+                            <p className="text-xs text-muted-foreground font-mono">
+                              {key.key.substring(0, 16)}...
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{key.userName}</p>
+                            <p className="text-sm text-muted-foreground">{key.userEmail}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-primary transition-all"
+                                style={{ width: `${Math.min((key.usageCount / key.usageLimit) * 100, 100)}%` }}
+                              />
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {key.usageCount}/{key.usageLimit}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={key.isActive ? 'default' : 'destructive'}>
+                            {key.isActive ? 'Active' : 'Revoked'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {key.lastUsed ? new Date(key.lastUsed).toLocaleDateString() : 'Never'}
+                        </TableCell>
+                        <TableCell>{new Date(key.createdAt).toLocaleDateString()}</TableCell>
+                        <TableCell>
+                          {key.isActive && (
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => revokeApiKeyMutation.mutate(key.id)}
+                              disabled={revokeApiKeyMutation.isPending}
+                            >
+                              <Ban className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Analytics Tab */}
+          <TabsContent value="analytics" className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold">System Analytics</h2>
+              <p className="text-muted-foreground">Comprehensive insights and performance metrics</p>
+            </div>
+
+            {analytics && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Downloads Over Time */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Downloads Over Time</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <AreaChart data={analytics.downloadsOverTime}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" />
+                        <YAxis />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="count" stroke="#8884d8" fill="#8884d8" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                {/* Format Distribution */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Popular Formats</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={analytics.formatStats}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="count"
+                          label={({ format, percent }) => `${format} ${(percent * 100).toFixed(0)}%`}
+                        >
+                          {analytics.formatStats.map((entry: any, index: number) => (
+                            <Cell key={`cell-${index}`} fill={`hsl(${index * 137.5}, 70%, 50%)`} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                {/* API Endpoint Usage */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>API Endpoint Performance</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={analytics.endpointUsage}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="endpoint" />
+                        <YAxis />
+                        <Tooltip />
+                        <Bar dataKey="count" fill="#8884d8" />
+                        <Bar dataKey="avgResponseTime" fill="#82ca9d" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                {/* Top Users */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Top Users by Usage</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {analytics.topUsers.slice(0, 10).map((user: any, index: number) => (
+                        <div key={user.username} className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3">
+                            <Badge variant="outline">{index + 1}</Badge>
+                            <div>
+                              <p className="font-medium">{user.username}</p>
+                              <p className="text-sm text-muted-foreground">{user.plan}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-medium">{user.downloadCount} downloads</p>
+                            <p className="text-sm text-muted-foreground">
+                              {(user.totalSize / 1024 / 1024).toFixed(1)} MB
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      <UserDialog />
+    </div>
+  );
+}

@@ -10,6 +10,7 @@ import { youtubeService } from "./services/youtube";
 import { telegramService } from "./services/telegram";
 import { insertUserSchema, insertApiKeySchema } from "@shared/schema";
 import { z } from "zod";
+import { registerAdminRoutes } from "./routes/admin";
 
 // Temporarily disable Stripe requirement for demo
 // if (!process.env.STRIPE_SECRET_KEY) {
@@ -25,6 +26,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'demo-jwt-secret-key-for-developmen
 // });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  
+  // Register admin routes
+  registerAdminRoutes(app);
   
   // Auth routes
   app.post("/api/auth/register", async (req, res) => {

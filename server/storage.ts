@@ -27,7 +27,7 @@ export interface IStorage {
   getDownloadByYoutubeId(youtubeId: string, format: string): Promise<Download | undefined>;
 
   // Usage stats methods
-  createUsageStats(stats: Omit<UsageStats, "id" | "createdAt">): Promise<UsageStats>;
+  createUsageStats(stats: Partial<Omit<UsageStats, "id" | "createdAt">> & { userId?: string; apiKeyId?: string; endpoint?: string; responseTime?: number; statusCode?: number }): Promise<UsageStats>;
   getUserUsageStats(userId: string, days?: number): Promise<UsageStats[]>;
   getApiKeyUsageStats(apiKeyId: string, days?: number): Promise<UsageStats[]>;
 }
@@ -148,8 +148,17 @@ export class DatabaseStorage implements IStorage {
     return download || undefined;
   }
 
-  async createUsageStats(stats: Omit<UsageStats, "id" | "createdAt">): Promise<UsageStats> {
-    const [usageStatsRecord] = await db.insert(usageStats).values(stats).returning();
+  async createUsageStats(stats: Partial<Omit<UsageStats, "id" | "createdAt">> & { userId?: string; apiKeyId?: string; endpoint?: string; responseTime?: number; statusCode?: number }): Promise<UsageStats> {
+    const [usageStatsRecord] = await db.insert(usageStats).values({
+      userId: stats.userId || null,
+      apiKeyId: stats.apiKeyId || null,
+      endpoint: stats.endpoint || null,
+      responseTime: stats.responseTime || null,
+      statusCode: stats.statusCode || null,
+      ipAddress: stats.ipAddress || null,
+      userAgent: stats.userAgent || null,
+      errorMessage: stats.errorMessage || null,
+    }).returning();
     return usageStatsRecord;
   }
 

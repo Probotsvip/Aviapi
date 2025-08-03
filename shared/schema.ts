@@ -12,7 +12,10 @@ export const users = pgTable("users", {
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
   plan: text("plan").default("free"), // free, starter, pro, enterprise
+  role: text("role").default("user"), // user, admin, super_admin
   isActive: boolean("is_active").default(true),
+  lastLogin: timestamp("last_login"),
+  ipAddress: text("ip_address"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -51,6 +54,28 @@ export const usageStats = pgTable("usage_stats", {
   endpoint: text("endpoint"), // /song, /video
   responseTime: integer("response_time"), // in milliseconds
   statusCode: integer("status_code"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const adminLogs = pgTable("admin_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  adminId: varchar("admin_id").notNull().references(() => users.id),
+  action: text("action").notNull(), // user_created, user_deleted, api_key_revoked, etc.
+  targetType: text("target_type"), // user, api_key, download, system
+  targetId: text("target_id"),
+  details: jsonb("details"),
+  ipAddress: text("ip_address"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const systemMetrics = pgTable("system_metrics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  metricType: text("metric_type").notNull(), // storage_usage, bandwidth, api_calls, etc.
+  value: integer("value").notNull(),
+  metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -59,6 +84,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   apiKeys: many(apiKeys),
   downloads: many(downloads),
   usageStats: many(usageStats),
+  adminLogs: many(adminLogs),
 }));
 
 export const apiKeysRelations = relations(apiKeys, ({ one, many }) => ({
@@ -75,6 +101,10 @@ export const downloadsRelations = relations(downloads, ({ one }) => ({
 export const usageStatsRelations = relations(usageStats, ({ one }) => ({
   user: one(users, { fields: [usageStats.userId], references: [users.id] }),
   apiKey: one(apiKeys, { fields: [usageStats.apiKeyId], references: [apiKeys.id] }),
+}));
+
+export const adminLogsRelations = relations(adminLogs, ({ one }) => ({
+  admin: one(users, { fields: [adminLogs.adminId], references: [users.id] }),
 }));
 
 // Insert schemas
@@ -102,3 +132,5 @@ export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 export type Download = typeof downloads.$inferSelect;
 export type InsertDownload = z.infer<typeof insertDownloadSchema>;
 export type UsageStats = typeof usageStats.$inferSelect;
+export type AdminLog = typeof adminLogs.$inferSelect;
+export type SystemMetric = typeof systemMetrics.$inferSelect;
