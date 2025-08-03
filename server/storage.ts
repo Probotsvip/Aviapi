@@ -156,9 +156,10 @@ export class DatabaseStorage implements IStorage {
       .from(downloads)
       .where(and(
         eq(downloads.youtubeId, youtubeId),
-        eq(downloads.format, format),
-        eq(downloads.status, "completed")
-      ));
+        eq(downloads.format, format)
+      ))
+      .orderBy(desc(downloads.createdAt))
+      .limit(1);
     return download || undefined;
   }
 

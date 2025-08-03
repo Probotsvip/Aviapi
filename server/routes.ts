@@ -131,7 +131,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { videoId } = req.params;
       const format = "mp3";
       
-      // Check if already downloaded by ANY user (shared cache)
+      // Check if already downloaded by ANY user (shared cache) with transaction lock
       console.log(`🔍 [${requestId}] Checking database for existing download (shared cache)...`);
       let existingDownload = await storage.getDownloadByYoutubeId(videoId, format);
       
@@ -164,19 +164,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
           format: existingDownload.format,
           duration: existingDownload.duration
         });
-      } else if (existingDownload) {
-        console.log(`⚠️ [${requestId}] Found incomplete download, will retry...`);
+      } else if (existingDownload && existingDownload.status === "downloading") {
+        console.log(`⚠️ [${requestId}] Found in-progress download, waiting for completion...`);
+        
+        // Wait for existing download to complete (up to 60 seconds)
+        for (let i = 0; i < 20; i++) {
+          await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
+          const updatedDownload = await storage.getDownloadByYoutubeId(videoId, format);
+          
+          if (updatedDownload && updatedDownload.status === "completed") {
+            console.log(`✅ [${requestId}] In-progress download completed! Returning cached result.`);
+            
+            const responseTime = Date.now() - startTime;
+            await storage.updateApiKeyUsage(req.apiKey!.id);
+            await storage.createUsageStats({
+              userId: req.apiKey!.userId,
+              apiKeyId: req.apiKey!.id,
+              endpoint: "/song",
+              responseTime: responseTime,
+              statusCode: 200
+            });
+            
+            console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (WAITED FOR CACHE) =====`);
+            return res.json({
+              status: "done",
+              title: updatedDownload.title,
+              link: updatedDownload.downloadUrl,
+              format: updatedDownload.format,
+              duration: updatedDownload.duration
+            });
+          }
+        }
+        console.log(`⚠️ [${requestId}] Timeout waiting for existing download, will create new one...`);
       } else {
         console.log(`❌ [${requestId}] CACHE MISS! No existing download found, will need to process...`);
       }
       
-      // Create new download record for current user
-      const download = await storage.createDownload({
-        youtubeId: videoId,
-        format,
-        userId: req.apiKey!.userId,
-        apiKeyId: req.apiKey!.id
-      });
+      // Create new download record for current user only if no other download exists
+      let download;
+      try {
+        download = await storage.createDownload({
+          youtubeId: videoId,
+          format,
+          userId: req.apiKey!.userId,
+          apiKeyId: req.apiKey!.id
+        });
+      } catch (error: any) {
+        // If creation fails due to race condition, check again for existing download
+        if (error.code === '23505') { // Unique constraint violation
+          console.log(`🔄 [${requestId}] Race condition detected, checking for existing download...`);
+          existingDownload = await storage.getDownloadByYoutubeId(videoId, format);
+          if (existingDownload && existingDownload.status === "completed") {
+            console.log(`✅ [${requestId}] Found completed download during race condition recovery`);
+            const responseTime = Date.now() - startTime;
+            await storage.updateApiKeyUsage(req.apiKey!.id);
+            await storage.createUsageStats({
+              userId: req.apiKey!.userId,
+              apiKeyId: req.apiKey!.id,
+              endpoint: "/song",
+              responseTime: responseTime,
+              statusCode: 200
+            });
+            
+            return res.json({
+              status: "done",
+              title: existingDownload.title,
+              link: existingDownload.downloadUrl,
+              format: existingDownload.format,
+              duration: existingDownload.duration
+            });
+          }
+        }
+        throw error;
+      }
       
       // Get video info
       const videoInfo = await youtubeService.getVideoInfo(videoId);

@@ -22,6 +22,7 @@ TubeAPI is a YouTube content download API service that provides developers with 
 - ✅ Powerful admin panel with advanced API key management (copy, delete, daily reset)
 - ✅ Complete database integration with PostgreSQL working perfectly
 - ✅ Authentication system fully functional with JWT tokens
+- ✅ Fixed duplicate upload issue in Telegram channel with improved caching logic
 - ⏳ Stripe payment integration (temporarily disabled for demo)
 
 # User Preferences
