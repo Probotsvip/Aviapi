@@ -8,7 +8,8 @@ from youtubesearchpython.__future__ import VideosSearch
 
 def time_to_seconds(time):
     stringt = str(time)
-    return sum(int(x) * 60**i for i, x in enumerate(reversed(stringt.split(":"))))
+    return sum(
+        int(x) * 60**i for i, x in enumerate(reversed(stringt.split(":"))))
 
 
 async def shell_cmd(cmd):
@@ -26,12 +27,11 @@ async def shell_cmd(cmd):
     return out.decode("utf-8")
 
 
-
 async def get_stream_url(query, video=False):
     # TubeAPI Advanced System Configuration
     api_url = "http://localhost:5000/api"  # Change to your TubeAPI domain in production
     api_key = "sk-admin-test-key-10k-requests"  # Use your TubeAPI key
-    
+
     # Extract video ID from YouTube URL
     video_id = None
     if "youtube.com/watch?v=" in query:
@@ -41,24 +41,24 @@ async def get_stream_url(query, video=False):
     else:
         print("Invalid YouTube URL:", query)
         return ""
-    
+
     async with httpx.AsyncClient(timeout=120) as client:
         # Choose endpoint based on video/audio requirement
         endpoint = f"{api_url}/video/{video_id}" if video else f"{api_url}/song/{video_id}"
-        
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        
+
         # Add API key as query parameter (TubeAPI style)
         params = {"api": api_key}
-        
+
         response = await client.get(endpoint, headers=headers, params=params)
         if response.status_code != 200:
             print("TubeAPI Error:", response.status_code, response.text)
             return ""
-            
+
         info = response.json()
         if info.get("status") == "done":
             return info.get("link", "")
@@ -67,8 +67,8 @@ async def get_stream_url(query, video=False):
             return ""
 
 
-
 class YouTubeAPI:
+
     def __init__(self):
         self.base = "https://www.youtube.com/watch?v="
         self.regex = r"(?:youtube\.com|youtu\.be)"
@@ -104,9 +104,9 @@ class YouTubeAPI:
                 for entity in message.caption_entities:
                     if entity.type == MessageEntityType.TEXT_LINK:
                         return entity.url
-        if offset in (None,):
+        if offset in (None, ):
             return None
-        return text[offset : offset + length]
+        return text[offset:offset + length]
 
     async def details(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
@@ -160,11 +160,14 @@ class YouTubeAPI:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-            
-        return await get_stream_url(link, True)
-        
 
-    async def playlist(self, link, limit, user_id, videoid: Union[bool, str] = None):
+        return await get_stream_url(link, True)
+
+    async def playlist(self,
+                       link,
+                       limit,
+                       user_id,
+                       videoid: Union[bool, str] = None):
         if videoid:
             link = self.listbase + link
         if "&" in link:
@@ -226,16 +229,20 @@ class YouTubeAPI:
                         format["format_note"]
                     except:
                         continue
-                    formats_available.append(
-                        {
-                            "format": format["format"],
-                            "filesize": format["filesize"],
-                            "format_id": format["format_id"],
-                            "ext": format["ext"],
-                            "format_note": format["format_note"],
-                            "yturl": link,
-                        }
-                    )
+                    formats_available.append({
+                        "format":
+                        format["format"],
+                        "filesize":
+                        format["filesize"],
+                        "format_id":
+                        format["format_id"],
+                        "ext":
+                        format["ext"],
+                        "format_note":
+                        format["format_note"],
+                        "yturl":
+                        link,
+                    })
         return formats_available, link
 
     async def slider(
@@ -290,7 +297,8 @@ class YouTubeAPI:
 
         def video_dl():
             ydl_optssx = {
-                "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
+                "format":
+                "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
                 "nocheckcertificate": True,
@@ -324,20 +332,25 @@ class YouTubeAPI:
         def song_audio_dl():
             fpath = f"downloads/{title}.%(ext)s"
             ydl_optssx = {
-                "format": format_id,
-                "outtmpl": fpath,
-                "geo_bypass": True,
-                "nocheckcertificate": True,
-                "quiet": True,
-                "no_warnings": True,
-                "prefer_ffmpeg": True,
-                "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": "192",
-                    }
-                ],
+                "format":
+                format_id,
+                "outtmpl":
+                fpath,
+                "geo_bypass":
+                True,
+                "nocheckcertificate":
+                True,
+                "quiet":
+                True,
+                "no_warnings":
+                True,
+                "prefer_ffmpeg":
+                True,
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }],
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
             x.download([link])
