@@ -90,12 +90,28 @@ interface ApiKey {
   userEmail: string;
 }
 
+interface ApiTestResult {
+  success: boolean;
+  statusCode?: number;
+  responseTime: number;
+  headers?: Record<string, string>;
+  data?: any;
+  error?: string;
+  url: string;
+  timestamp: string;
+}
+
 export default function AdminPanel() {
   const [location, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState("dashboard");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [userPage, setUserPage] = useState(1);
+  const [testUrl, setTestUrl] = useState("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  const [testFormat, setTestFormat] = useState("mp3");
+  const [testEndpoint, setTestEndpoint] = useState("/api/song");
+  const [testResult, setTestResult] = useState<ApiTestResult | null>(null);
+  const [isTestLoading, setIsTestLoading] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -120,6 +136,12 @@ export default function AdminPanel() {
   const { data: analytics } = useQuery({
     queryKey: ["/api/admin/analytics"],
     queryFn: () => apiRequest("/api/admin/analytics?days=30"),
+  });
+
+  // Admin test API key query
+  const { data: testApiKey } = useQuery({
+    queryKey: ["/api/admin/test-api-key"],
+    queryFn: () => apiRequest("/api/admin/test-api-key"),
   });
 
   // User update mutation
@@ -149,6 +171,47 @@ export default function AdminPanel() {
     },
     onError: () => {
       toast({ title: "Failed to revoke API key", variant: "destructive" });
+    },
+  });
+
+  // Test API endpoint
+  const testApiEndpoint = async () => {
+    if (!testApiKey?.apiKey) {
+      toast({ title: "No test API key available", variant: "destructive" });
+      return;
+    }
+
+    setIsTestLoading(true);
+    try {
+      const result = await apiRequest("/api/admin/test-endpoint", {
+        method: "POST",
+        body: JSON.stringify({
+          endpoint: testEndpoint,
+          youtubeUrl: testUrl,
+          format: testFormat,
+          apiKey: testApiKey.apiKey,
+        }),
+      });
+
+      setTestResult(result);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/test-api-key"] });
+      toast({ title: "API test completed" });
+    } catch (error) {
+      toast({ title: "API test failed", variant: "destructive" });
+    } finally {
+      setIsTestLoading(false);
+    }
+  };
+
+  // Reset test key usage
+  const resetTestKeyMutation = useMutation({
+    mutationFn: () => apiRequest("/api/admin/reset-test-key", { method: "POST" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/test-api-key"] });
+      toast({ title: "Test key usage reset successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to reset test key", variant: "destructive" });
     },
   });
 
@@ -324,8 +387,12 @@ export default function AdminPanel() {
               <Download className="h-4 w-4" />
               Downloads
             </TabsTrigger>
-            <TabsTrigger value="system" className="flex items-center gap-2">
+            <TabsTrigger value="api-test" className="flex items-center gap-2">
               <Settings className="h-4 w-4" />
+              API Test
+            </TabsTrigger>
+            <TabsTrigger value="system" className="flex items-center gap-2">
+              <Database className="h-4 w-4" />
               System
             </TabsTrigger>
           </TabsList>
@@ -695,6 +762,222 @@ export default function AdminPanel() {
                   </CardContent>
                 </Card>
               </div>
+            )}
+          </TabsContent>
+
+          {/* API Test Tab */}
+          <TabsContent value="api-test" className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold">API Server Testing</h2>
+              <p className="text-muted-foreground">Test API endpoints with admin credentials and view detailed responses</p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Test Configuration */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Settings className="h-5 w-5" />
+                    Test Configuration
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {testApiKey && (
+                    <div className="p-3 bg-muted rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <Label className="text-sm font-medium">Admin Test API Key</Label>
+                        <Badge variant="outline">10k Daily Limit</Badge>
+                      </div>
+                      <p className="text-xs font-mono bg-background p-2 rounded border">
+                        {testApiKey.apiKey}
+                      </p>
+                      <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
+                        <span>Usage: {testApiKey.usageCount}/{testApiKey.usageLimit}</span>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => resetTestKeyMutation.mutate()}
+                          disabled={resetTestKeyMutation.isPending}
+                        >
+                          Reset Usage
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    <div>
+                      <Label htmlFor="endpoint">API Endpoint</Label>
+                      <Select value={testEndpoint} onValueChange={setTestEndpoint}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="/api/song">Audio Download - /api/song</SelectItem>
+                          <SelectItem value="/api/video">Video Download - /api/video</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="url">YouTube URL</Label>
+                      <Input
+                        id="url"
+                        value={testUrl}
+                        onChange={(e) => setTestUrl(e.target.value)}
+                        placeholder="https://www.youtube.com/watch?v=..."
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="format">Format</Label>
+                      <Select value={testFormat} onValueChange={setTestFormat}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="mp3">MP3 (Audio)</SelectItem>
+                          <SelectItem value="m4a">M4A (Audio)</SelectItem>
+                          <SelectItem value="mp4">MP4 (Video)</SelectItem>
+                          <SelectItem value="webm">WebM (Video)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <Button 
+                      onClick={testApiEndpoint} 
+                      disabled={isTestLoading || !testApiKey}
+                      className="w-full"
+                    >
+                      {isTestLoading ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          Testing API...
+                        </>
+                      ) : (
+                        <>
+                          <Activity className="h-4 w-4 mr-2" />
+                          Test API Endpoint
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Test Results */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Response Details
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {testResult ? (
+                    <div className="space-y-4">
+                      {/* Status Overview */}
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="flex items-center gap-2">
+                          {testResult.success ? (
+                            <CheckCircle className="h-5 w-5 text-green-500" />
+                          ) : (
+                            <XCircle className="h-5 w-5 text-red-500" />
+                          )}
+                          <span className="font-medium">
+                            {testResult.success ? "Success" : "Failed"}
+                          </span>
+                        </div>
+                        <div className="text-right text-sm">
+                          <div>Status: {testResult.statusCode}</div>
+                          <div className="text-muted-foreground">{testResult.responseTime}ms</div>
+                        </div>
+                      </div>
+
+                      {/* Request URL */}
+                      <div>
+                        <Label className="text-sm font-medium">Request URL</Label>
+                        <p className="text-xs font-mono bg-muted p-2 rounded mt-1 break-all">
+                          {testResult.url}
+                        </p>
+                      </div>
+
+                      {/* Response Headers */}
+                      {testResult.headers && (
+                        <div>
+                          <Label className="text-sm font-medium">Response Headers</Label>
+                          <div className="text-xs font-mono bg-muted p-2 rounded mt-1 max-h-40 overflow-auto">
+                            {Object.entries(testResult.headers).map(([key, value]) => (
+                              <div key={key} className="flex">
+                                <span className="text-blue-600 mr-2">{key}:</span>
+                                <span>{value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Response Data */}
+                      <div>
+                        <Label className="text-sm font-medium">Response Data</Label>
+                        <div className="text-xs font-mono bg-muted p-2 rounded mt-1 max-h-60 overflow-auto">
+                          {testResult.error ? (
+                            <div className="text-red-500">Error: {testResult.error}</div>
+                          ) : (
+                            <pre>{JSON.stringify(testResult.data, null, 2)}</pre>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Timestamp */}
+                      <div className="text-xs text-muted-foreground">
+                        Tested at: {new Date(testResult.timestamp).toLocaleString()}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>Run an API test to see detailed response information</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Quick Test Results Summary */}
+            {testResult && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <BarChart3 className="h-5 w-5" />
+                    Quick Summary
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="text-center p-3 border rounded-lg">
+                      <div className="text-2xl font-bold">
+                        {testResult.success ? "✓" : "✗"}
+                      </div>
+                      <div className="text-sm text-muted-foreground">Status</div>
+                    </div>
+                    <div className="text-center p-3 border rounded-lg">
+                      <div className="text-2xl font-bold">{testResult.statusCode}</div>
+                      <div className="text-sm text-muted-foreground">HTTP Code</div>
+                    </div>
+                    <div className="text-center p-3 border rounded-lg">
+                      <div className="text-2xl font-bold">{testResult.responseTime}ms</div>
+                      <div className="text-sm text-muted-foreground">Response Time</div>
+                    </div>
+                    <div className="text-center p-3 border rounded-lg">
+                      <div className="text-2xl font-bold">
+                        {testResult.data ? Object.keys(testResult.data).length || "N/A" : "0"}
+                      </div>
+                      <div className="text-sm text-muted-foreground">Data Fields</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </TabsContent>
         </Tabs>

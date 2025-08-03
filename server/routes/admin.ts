@@ -424,4 +424,169 @@ export function registerAdminRoutes(app: Express) {
     }
   });
 
+  // API Testing - Get default admin API key
+  app.get("/api/admin/test-api-key", authenticateUser, requireAdmin, async (req, res) => {
+    try {
+      // Check if admin test key exists
+      let [adminKey] = await db
+        .select()
+        .from(apiKeys)
+        .where(and(eq(apiKeys.name, "Admin Test Key"), eq(apiKeys.isActive, true)));
+
+      // Create admin test key if it doesn't exist
+      if (!adminKey) {
+        const testKey = `admin_test_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+        
+        [adminKey] = await db
+          .insert(apiKeys)
+          .values({
+            userId: req.user!.id,
+            key: testKey,
+            name: "Admin Test Key",
+            usageLimit: 10000, // 10k daily requests
+            usageCount: 0,
+            isActive: true,
+          })
+          .returning();
+
+        await logAdminAction(
+          req.user!.id,
+          "admin_test_key_created",
+          "api_key",
+          adminKey.id,
+          { usageLimit: 10000 },
+          req.ip
+        );
+      }
+
+      res.json({ 
+        apiKey: adminKey.key,
+        usageCount: adminKey.usageCount,
+        usageLimit: adminKey.usageLimit,
+        resetDaily: true
+      });
+
+    } catch (error: any) {
+      console.error("Admin test key error:", error);
+      res.status(500).json({ message: "Failed to get admin test key" });
+    }
+  });
+
+  // API Testing - Test endpoint with detailed response
+  app.post("/api/admin/test-endpoint", authenticateUser, requireAdmin, async (req, res) => {
+    try {
+      const { endpoint, youtubeUrl, format, apiKey } = req.body;
+      
+      if (!endpoint || !youtubeUrl || !apiKey) {
+        return res.status(400).json({ 
+          message: "Missing required fields: endpoint, youtubeUrl, apiKey" 
+        });
+      }
+
+      const startTime = Date.now();
+      let testResult: any = {};
+
+      try {
+        // Make internal API call to test the endpoint
+        const baseUrl = `http://localhost:5000`;
+        const testUrl = `${baseUrl}${endpoint}?url=${encodeURIComponent(youtubeUrl)}&format=${format || 'mp3'}&api=${apiKey}`;
+        
+        const fetch = (await import('node-fetch')).default;
+        const response = await fetch(testUrl);
+        const responseTime = Date.now() - startTime;
+        
+        let responseData;
+        const contentType = response.headers.get('content-type');
+        
+        if (contentType?.includes('application/json')) {
+          responseData = await response.json();
+        } else {
+          responseData = await response.text();
+        }
+
+        testResult = {
+          success: response.ok,
+          statusCode: response.status,
+          responseTime,
+          headers: Object.fromEntries(response.headers.entries()),
+          data: responseData,
+          url: testUrl,
+          timestamp: new Date().toISOString()
+        };
+
+        // Log the admin API test
+        await logAdminAction(
+          req.user!.id,
+          "api_endpoint_tested",
+          "system",
+          endpoint,
+          {
+            youtubeUrl,
+            format,
+            statusCode: response.status,
+            responseTime,
+            success: response.ok
+          },
+          req.ip
+        );
+
+      } catch (testError: any) {
+        const responseTime = Date.now() - startTime;
+        
+        testResult = {
+          success: false,
+          error: testError.message,
+          responseTime,
+          timestamp: new Date().toISOString(),
+          url: `${endpoint}?url=${encodeURIComponent(youtubeUrl)}&format=${format || 'mp3'}&api=${apiKey}`
+        };
+
+        await logAdminAction(
+          req.user!.id,
+          "api_endpoint_test_failed",
+          "system",
+          endpoint,
+          {
+            youtubeUrl,
+            format,
+            error: testError.message,
+            responseTime
+          },
+          req.ip
+        );
+      }
+
+      res.json(testResult);
+
+    } catch (error: any) {
+      console.error("API test error:", error);
+      res.status(500).json({ message: "Failed to test API endpoint" });
+    }
+  });
+
+  // Reset admin test key usage (daily reset)
+  app.post("/api/admin/reset-test-key", authenticateUser, requireAdmin, async (req, res) => {
+    try {
+      await db
+        .update(apiKeys)
+        .set({ usageCount: 0 })
+        .where(and(eq(apiKeys.name, "Admin Test Key"), eq(apiKeys.isActive, true)));
+
+      await logAdminAction(
+        req.user!.id,
+        "admin_test_key_reset",
+        "api_key",
+        "admin_test_key",
+        null,
+        req.ip
+      );
+
+      res.json({ message: "Admin test key usage reset successfully" });
+
+    } catch (error: any) {
+      console.error("Test key reset error:", error);
+      res.status(500).json({ message: "Failed to reset test key" });
+    }
+  });
+
 }
