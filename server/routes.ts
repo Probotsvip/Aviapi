@@ -131,27 +131,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { videoId } = req.params;
       const format = "mp3";
       
-      // Check if already downloaded
-      console.log(`🔍 [${requestId}] Checking database for existing download...`);
-      let download = await storage.getDownloadByYoutubeId(videoId, format);
+      // Check if already downloaded by ANY user (shared cache)
+      console.log(`🔍 [${requestId}] Checking database for existing download (shared cache)...`);
+      let existingDownload = await storage.getDownloadByYoutubeId(videoId, format);
       
-      if (download) {
-        console.log(`✅ [${requestId}] CACHED HIT! Found existing download:`);
-        console.log(`✅ [${requestId}] - Title: ${download.title}`);
-        console.log(`✅ [${requestId}] - Status: ${download.status}`);
-        console.log(`✅ [${requestId}] - File Size: ${download.fileSize ? (download.fileSize / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown'}`);
-        console.log(`✅ [${requestId}] - Telegram Message: ${download.telegramMessageId}`);
-        console.log(`✅ [${requestId}] - Stream URL: ${download.downloadUrl}`);
-      } else {
-        console.log(`❌ [${requestId}] CACHE MISS! No existing download found, will need to process...`);
-      }
-      
-      if (download && download.status === "completed") {
-        // Return existing download
-        console.log(`⚡ [${requestId}] RETURNING CACHED RESULT - No processing needed!`);
-        const responseTime = Date.now() - startTime;
-        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (FAST!)`);
+      if (existingDownload && existingDownload.status === "completed") {
+        console.log(`✅ [${requestId}] SHARED CACHE HIT! Found existing download:`);
+        console.log(`✅ [${requestId}] - Title: ${existingDownload.title}`);
+        console.log(`✅ [${requestId}] - File Size: ${existingDownload.fileSize ? (existingDownload.fileSize / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown'}`);
+        console.log(`✅ [${requestId}] - Telegram Message: ${existingDownload.telegramMessageId}`);
+        console.log(`✅ [${requestId}] - Stream URL: ${existingDownload.downloadUrl}`);
+        console.log(`🔄 [${requestId}] REUSING TELEGRAM FILE - Same file for all API keys!`);
         
+        const responseTime = Date.now() - startTime;
+        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (SUPER FAST - SHARED CACHE!)`);
+        
+        // Update usage for current API key
         await storage.updateApiKeyUsage(req.apiKey!.id);
         await storage.createUsageStats({
           userId: req.apiKey!.userId,
@@ -161,25 +156,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           statusCode: 200
         });
         
-        console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (CACHED) =====`);
+        console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (SHARED CACHE) =====`);
         return res.json({
           status: "done",
-          title: download.title,
-          link: download.downloadUrl,
-          format: download.format,
-          duration: download.duration
+          title: existingDownload.title,
+          link: existingDownload.downloadUrl,
+          format: existingDownload.format,
+          duration: existingDownload.duration
         });
+      } else if (existingDownload) {
+        console.log(`⚠️ [${requestId}] Found incomplete download, will retry...`);
+      } else {
+        console.log(`❌ [${requestId}] CACHE MISS! No existing download found, will need to process...`);
       }
       
-      // Create new download record
-      if (!download) {
-        download = await storage.createDownload({
-          youtubeId: videoId,
-          format,
-          userId: req.apiKey!.userId,
-          apiKeyId: req.apiKey!.id
-        });
-      }
+      // Create new download record for current user
+      const download = await storage.createDownload({
+        youtubeId: videoId,
+        format,
+        userId: req.apiKey!.userId,
+        apiKeyId: req.apiKey!.id
+      });
       
       // Get video info
       const videoInfo = await youtubeService.getVideoInfo(videoId);
@@ -279,16 +276,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/video/:videoId", authenticateApiKey, rateLimitByApiKey, async (req, res) => {
     const startTime = Date.now();
+    const requestId = `VID_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    console.log(`🎬 [${requestId}] ===== VIDEO REQUEST STARTED =====`);
+    console.log(`🎬 [${requestId}] Video ID: ${req.params.videoId}`);
+    console.log(`🎬 [${requestId}] API Key: ${req.apiKey?.key?.substring(0, 8)}...`);
     
     try {
       const { videoId } = req.params;
       const quality = req.query.quality as string || "720p";
       const format = "mp4";
       
-      // Check if already downloaded
-      let download = await storage.getDownloadByYoutubeId(videoId, format);
+      // Check if already downloaded by ANY user (shared cache)
+      console.log(`🔍 [${requestId}] Checking database for existing video download (shared cache)...`);
+      let existingDownload = await storage.getDownloadByYoutubeId(videoId, format);
       
-      if (download && download.status === "completed") {
+      if (existingDownload && existingDownload.status === "completed") {
+        console.log(`✅ [${requestId}] SHARED VIDEO CACHE HIT! Found existing download:`);
+        console.log(`✅ [${requestId}] - Title: ${existingDownload.title}`);
+        console.log(`✅ [${requestId}] - File Size: ${existingDownload.fileSize ? (existingDownload.fileSize / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown'}`);
+        console.log(`🔄 [${requestId}] REUSING TELEGRAM VIDEO FILE - Same file for all API keys!`);
+        
         await storage.updateApiKeyUsage(req.apiKey!.id);
         await storage.createUsageStats({
           userId: req.apiKey!.userId,
@@ -298,26 +306,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           statusCode: 200
         });
         
+        console.log(`🎬 [${requestId}] ===== VIDEO REQUEST COMPLETED (SHARED CACHE) =====`);
         return res.json({
           status: "done",
-          title: download.title,
-          link: download.downloadUrl,
-          format: download.format,
+          title: existingDownload.title,
+          link: existingDownload.downloadUrl,
+          format: existingDownload.format,
           quality,
-          duration: download.duration,
-          size: download.fileSize ? `${(download.fileSize / 1024 / 1024).toFixed(1)} MB` : undefined
+          duration: existingDownload.duration,
+          size: existingDownload.fileSize ? `${(existingDownload.fileSize / 1024 / 1024).toFixed(1)} MB` : undefined
         });
+      } else {
+        console.log(`❌ [${requestId}] VIDEO CACHE MISS! No existing download found, will need to process...`);
       }
       
-      // Create new download record
-      if (!download) {
-        download = await storage.createDownload({
-          youtubeId: videoId,
-          format,
-          userId: req.apiKey!.userId,
-          apiKeyId: req.apiKey!.id
-        });
-      }
+      // Create new download record for current user
+      const download = await storage.createDownload({
+        youtubeId: videoId,
+        format,
+        userId: req.apiKey!.userId,
+        apiKeyId: req.apiKey!.id
+      });
       
       // Get video info
       const videoInfo = await youtubeService.getVideoInfo(videoId);
