@@ -202,13 +202,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
     } catch (error: any) {
-      await storage.createUsageStats({
-        userId: req.apiKey?.userId,
-        apiKeyId: req.apiKey?.id,
-        endpoint: "/song",
-        responseTime: Date.now() - startTime,
-        statusCode: 500
-      });
+      if (req.apiKey) {
+        await storage.createUsageStats({
+          userId: req.apiKey.userId,
+          apiKeyId: req.apiKey.id,
+          endpoint: "/song",
+          responseTime: Date.now() - startTime,
+          statusCode: 500
+        });
+      }
       res.status(500).json({ error: error.message });
     }
   });
@@ -306,13 +308,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
     } catch (error: any) {
-      await storage.createUsageStats({
-        userId: req.apiKey?.userId,
-        apiKeyId: req.apiKey?.id,
-        endpoint: "/video",
-        responseTime: Date.now() - startTime,
-        statusCode: 500
-      });
+      if (req.apiKey) {
+        await storage.createUsageStats({
+          userId: req.apiKey.userId,
+          apiKeyId: req.apiKey.id,
+          endpoint: "/video",
+          responseTime: Date.now() - startTime,
+          statusCode: 500
+        });
+      }
       res.status(500).json({ error: error.message });
     }
   });
@@ -330,8 +334,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const avgResponseTime = totalRequests > 0 ? 
         Math.round(usageStats.reduce((sum, s) => sum + (s.responseTime || 0), 0) / totalRequests) : 0;
       
-      const totalUsage = userKeys.reduce((sum, key) => sum + key.usageCount, 0);
-      const totalLimit = userKeys.reduce((sum, key) => sum + key.usageLimit, 0);
+      const totalUsage = userKeys.reduce((sum, key) => sum + (key.usageCount || 0), 0);
+      const totalLimit = userKeys.reduce((sum, key) => sum + (key.usageLimit || 0), 0);
       const creditsLeft = totalLimit - totalUsage;
       
       res.json({
