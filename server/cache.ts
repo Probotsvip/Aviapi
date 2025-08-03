@@ -3,14 +3,14 @@ interface CacheItem {
   title: string;
   downloadUrl: string;
   format: string;
-  duration: string;
+  duration: string | null;
   timestamp: number;
 }
 
 class FastCache {
   private cache: Map<string, CacheItem> = new Map();
-  private maxSize = 1000; // Store up to 1000 popular songs
-  private ttl = 24 * 60 * 60 * 1000; // 24 hours TTL
+  private maxSize = 2000; // Store up to 2000 popular songs
+  private ttl = 7 * 24 * 60 * 60 * 1000; // 7 days TTL for longer caching
 
   set(videoId: string, format: string, data: CacheItem): void {
     const key = `${videoId}_${format}`;
@@ -18,7 +18,9 @@ class FastCache {
     // Remove oldest item if cache is full
     if (this.cache.size >= this.maxSize) {
       const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
+      if (firstKey) {
+        this.cache.delete(firstKey);
+      }
     }
     
     this.cache.set(key, { ...data, timestamp: Date.now() });

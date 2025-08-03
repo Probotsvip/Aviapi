@@ -135,68 +135,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // FIRST: Check in-memory cache (ultra fast)
       const cacheItem = fastCache.get(videoId, format);
       if (cacheItem) {
-        console.log(`⚡ [${requestId}] MEMORY CACHE HIT! Ultra-fast response`);
-        
         const responseTime = Date.now() - startTime;
-        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (LIGHTNING FAST - MEMORY CACHE!)`);
+        console.log(`⚡ [${requestId}] MEMORY CACHE HIT! ${responseTime}ms`);
         
-        // Update usage stats in background (non-blocking)
-        Promise.all([
-          storage.updateApiKeyUsage(req.apiKey!.id),
-          storage.createUsageStats({
-            userId: req.apiKey!.userId,
-            apiKeyId: req.apiKey!.id,
-            endpoint: "/song",
-            responseTime: responseTime,
-            statusCode: 200
-          })
-        ]).catch(err => console.error('Background stats update failed:', err));
+        // Update usage stats in background (completely non-blocking)
+        setImmediate(() => {
+          Promise.all([
+            storage.updateApiKeyUsage(req.apiKey!.id),
+            storage.createUsageStats({
+              userId: req.apiKey!.userId,
+              apiKeyId: req.apiKey!.id,
+              endpoint: "/song",
+              responseTime: responseTime,
+              statusCode: 200
+            })
+          ]).catch(() => {}); // Silent error handling for performance
+        });
         
-        console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (MEMORY CACHE) =====`);
         return res.json({
           status: "done",
           title: cacheItem.title,
           link: cacheItem.downloadUrl,
           format: cacheItem.format,
-          duration: cacheItem.duration
+          duration: cacheItem.duration || "Unknown"
         });
       }
 
       // SECOND: Check database cache with Telegram integration
-      console.log(`🔍 [${requestId}] Checking database for existing download (shared cache)...`);
       let existingDownload = await storage.getDownloadByYoutubeId(videoId, format);
       
       if (existingDownload && existingDownload.status === "completed") {
-        console.log(`✅ [${requestId}] DATABASE CACHE HIT! Found existing download:`);
-        console.log(`✅ [${requestId}] - Title: ${existingDownload.title}`);
-        console.log(`✅ [${requestId}] - File Size: ${existingDownload.fileSize ? (existingDownload.fileSize / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown'}`);
-        console.log(`✅ [${requestId}] - Stream URL: ${existingDownload.downloadUrl}`);
-        
         const responseTime = Date.now() - startTime;
-        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (ULTRA FAST - DATABASE CACHE!)`);
+        console.log(`💾 [${requestId}] DB CACHE HIT! ${responseTime}ms - ${existingDownload.title}`);
         
         // Add to memory cache for next time
         fastCache.set(videoId, format, {
-          title: existingDownload.title,
-          downloadUrl: existingDownload.downloadUrl,
-          format: existingDownload.format,
-          duration: existingDownload.duration,
+          title: existingDownload.title || "Unknown Title",
+          downloadUrl: existingDownload.downloadUrl || "",
+          format: existingDownload.format || "mp3",
+          duration: existingDownload.duration || "Unknown",
           timestamp: Date.now()
         });
 
-        // Update usage stats in background (non-blocking)
-        Promise.all([
-          storage.updateApiKeyUsage(req.apiKey!.id),
-          storage.createUsageStats({
-            userId: req.apiKey!.userId,
-            apiKeyId: req.apiKey!.id,
-            endpoint: "/song",
-            responseTime: responseTime,
-            statusCode: 200
-          })
-        ]).catch(err => console.error('Background stats update failed:', err));
+        // Update usage stats in background (completely non-blocking)
+        setImmediate(() => {
+          Promise.all([
+            storage.updateApiKeyUsage(req.apiKey!.id),
+            storage.createUsageStats({
+              userId: req.apiKey!.userId,
+              apiKeyId: req.apiKey!.id,
+              endpoint: "/song",
+              responseTime: responseTime,
+              statusCode: 200
+            })
+          ]).catch(() => {}); // Silent error handling for performance
+        });
         
-        console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (TELEGRAM CACHE) =====`);
         return res.json({
           status: "done",
           title: existingDownload.title,
@@ -345,10 +339,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Add to memory cache for next time
       fastCache.set(videoId, format, {
-        title: updatedDownload.title,
-        downloadUrl: updatedDownload.downloadUrl,
-        format: updatedDownload.format,
-        duration: updatedDownload.duration,
+        title: updatedDownload.title || "Unknown Title",
+        downloadUrl: updatedDownload.downloadUrl || "",
+        format: updatedDownload.format || "mp3",
+        duration: updatedDownload.duration || "Unknown",
         timestamp: Date.now()
       });
 
