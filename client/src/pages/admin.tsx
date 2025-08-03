@@ -621,7 +621,7 @@ export default function AdminPanel() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {apiKeysData?.apiKeys?.map((key: ApiKey) => (
+                    {Array.isArray(apiKeysData) && apiKeysData.map((key: ApiKey) => (
                       <TableRow key={key.id}>
                         <TableCell>
                           <div>
