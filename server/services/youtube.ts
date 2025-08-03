@@ -257,7 +257,7 @@ class YouTubeService {
     }
   }
 
-  async downloadVideo(videoId: string, quality: string = "720p"): Promise<Buffer | null> {
+  async downloadVideo(videoId: string, quality: string = "best"): Promise<Buffer | null> {
     try {
       // Direct download with yt-dlp (no recursive API calls)
       const url = `https://www.youtube.com/watch?v=${videoId}`;
@@ -267,29 +267,38 @@ class YouTubeService {
       const cookieFile = this.getCookieFile();
       const cookieFlag = cookieFile ? `--cookies "${cookieFile}"` : '';
       
-      console.log(`Downloading high-quality video for ${videoId} at ${quality} with yt-dlp`);
+      console.log(`Downloading HIGHEST quality video for ${videoId} with yt-dlp (AUTO-SELECT BEST)`);
       
-      // Map quality to yt-dlp format selector
-      let formatSelector = "best[ext=mp4]";
-      switch (quality) {
-        case "4K":
-        case "2160p":
-          formatSelector = "best[height<=2160][ext=mp4]/best[ext=mp4]";
-          break;
-        case "1440p":
-          formatSelector = "best[height<=1440][ext=mp4]/best[ext=mp4]";
-          break;
-        case "1080p":
-          formatSelector = "best[height<=1080][ext=mp4]/best[ext=mp4]";
-          break;
-        case "720p":
-          formatSelector = "best[height<=720][ext=mp4]/best[ext=mp4]";
-          break;
-        case "480p":
-          formatSelector = "best[height<=480][ext=mp4]/best[ext=mp4]";
-          break;
-        default:
-          formatSelector = "best[ext=mp4]";
+      // Always select the highest quality available - AUTO HIGHER QUALITY SELECTION
+      let formatSelector = "best[ext=mp4]/best";
+      
+      // Priority order: 4K -> 1440p -> 1080p -> 720p -> 480p -> any best
+      if (quality === "best" || !quality) {
+        // Auto-select highest available quality (4K -> 1080p -> 720p -> best)
+        formatSelector = "best[height<=2160][ext=mp4]/best[height<=1440][ext=mp4]/best[height<=1080][ext=mp4]/best[height<=720][ext=mp4]/best[ext=mp4]/best";
+        console.log(`🎯 AUTO-SELECTING HIGHEST QUALITY: Trying 4K->1440p->1080p->720p->best`);
+      } else {
+        // Manual quality selection (for backwards compatibility)
+        switch (quality) {
+          case "4K":
+          case "2160p":
+            formatSelector = "best[height<=2160][ext=mp4]/best[ext=mp4]";
+            break;
+          case "1440p":
+            formatSelector = "best[height<=1440][ext=mp4]/best[ext=mp4]";
+            break;
+          case "1080p":
+            formatSelector = "best[height<=1080][ext=mp4]/best[ext=mp4]";
+            break;
+          case "720p":
+            formatSelector = "best[height<=720][ext=mp4]/best[ext=mp4]";
+            break;
+          case "480p":
+            formatSelector = "best[height<=480][ext=mp4]/best[ext=mp4]";
+            break;
+          default:
+            formatSelector = "best[ext=mp4]/best";
+        }
       }
       
       const command = `yt-dlp ${cookieFlag} -f "${formatSelector}" -o "${outputPath}.%(ext)s" "${url}"`;

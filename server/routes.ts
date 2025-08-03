@@ -284,7 +284,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     try {
       const { videoId } = req.params;
-      const quality = req.query.quality as string || "720p";
+      const quality = req.query.quality as string || "best"; // AUTO-SELECT HIGHEST QUALITY
       const format = "mp4";
       
       // Check if already downloaded by ANY user (shared cache)
