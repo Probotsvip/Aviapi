@@ -119,25 +119,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // YouTube API routes
   app.get("/api/song/:videoId", authenticateApiKey, rateLimitByApiKey, async (req, res) => {
     const startTime = Date.now();
+    const requestId = `REQ_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    console.log(`🎵 [${requestId}] ===== AUDIO REQUEST STARTED =====`);
+    console.log(`🎵 [${requestId}] Video ID: ${req.params.videoId}`);
+    console.log(`🎵 [${requestId}] API Key: ${req.apiKey?.key?.substring(0, 8)}...`);
+    console.log(`🎵 [${requestId}] User ID: ${req.apiKey?.userId}`);
+    console.log(`🎵 [${requestId}] Request Time: ${new Date().toISOString()}`);
     
     try {
       const { videoId } = req.params;
       const format = "mp3";
       
       // Check if already downloaded
+      console.log(`🔍 [${requestId}] Checking database for existing download...`);
       let download = await storage.getDownloadByYoutubeId(videoId, format);
+      
+      if (download) {
+        console.log(`✅ [${requestId}] CACHED HIT! Found existing download:`);
+        console.log(`✅ [${requestId}] - Title: ${download.title}`);
+        console.log(`✅ [${requestId}] - Status: ${download.status}`);
+        console.log(`✅ [${requestId}] - File Size: ${download.fileSize ? (download.fileSize / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown'}`);
+        console.log(`✅ [${requestId}] - Telegram Message: ${download.telegramMessageId}`);
+        console.log(`✅ [${requestId}] - Stream URL: ${download.downloadUrl}`);
+      } else {
+        console.log(`❌ [${requestId}] CACHE MISS! No existing download found, will need to process...`);
+      }
       
       if (download && download.status === "completed") {
         // Return existing download
+        console.log(`⚡ [${requestId}] RETURNING CACHED RESULT - No processing needed!`);
+        const responseTime = Date.now() - startTime;
+        console.log(`⚡ [${requestId}] Response time: ${responseTime}ms (FAST!)`);
+        
         await storage.updateApiKeyUsage(req.apiKey!.id);
         await storage.createUsageStats({
           userId: req.apiKey!.userId,
           apiKeyId: req.apiKey!.id,
           endpoint: "/song",
-          responseTime: Date.now() - startTime,
+          responseTime: responseTime,
           statusCode: 200
         });
         
+        console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (CACHED) =====`);
         return res.json({
           status: "done",
           title: download.title,
@@ -165,19 +189,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Download and upload to Telegram
+      console.log(`⬇️ [${requestId}] Starting audio download from YouTube...`);
+      const downloadStartTime = Date.now();
       const audioBuffer = await youtubeService.downloadAudio(videoId);
+      const downloadTime = Date.now() - downloadStartTime;
+      console.log(`⬇️ [${requestId}] Download completed in ${downloadTime}ms`);
+      console.log(`⬇️ [${requestId}] Audio buffer size: ${audioBuffer ? (audioBuffer.length / 1024 / 1024).toFixed(1) + ' MB' : 'FAILED'}`);
+      
       if (!audioBuffer) {
+        console.log(`❌ [${requestId}] ERROR: Audio download failed!`);
         await storage.updateDownload(download.id, { status: "failed" });
         return res.status(500).json({ error: "Download failed" });
       }
       
+      console.log(`📤 [${requestId}] Uploading to Telegram channel...`);
+      const uploadStartTime = Date.now();
       const telegramFile = await telegramService.uploadAudio(audioBuffer, videoInfo.title, videoId, videoInfo.duration);
+      const uploadTime = Date.now() - uploadStartTime;
+      console.log(`📤 [${requestId}] Telegram upload completed in ${uploadTime}ms`);
+      
+      if (telegramFile) {
+        console.log(`📤 [${requestId}] Upload SUCCESS:`);
+        console.log(`📤 [${requestId}] - Message ID: ${telegramFile.messageId}`);
+        console.log(`📤 [${requestId}] - File ID: ${telegramFile.fileId}`);
+        console.log(`📤 [${requestId}] - Stream URL: ${telegramFile.downloadUrl}`);
+      } else {
+        console.log(`❌ [${requestId}] ERROR: Telegram upload failed!`);
+      }
+      
       if (!telegramFile) {
         await storage.updateDownload(download.id, { status: "failed" });
         return res.status(500).json({ error: "Upload to Telegram failed" });
       }
       
       // Update download record
+      console.log(`💾 [${requestId}] Updating database with completion status...`);
       const updatedDownload = await storage.updateDownload(download.id, {
         title: videoInfo.title,
         telegramMessageId: telegramFile.messageId,
@@ -187,15 +233,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fileSize: audioBuffer.length,
         status: "completed"
       });
+      console.log(`💾 [${requestId}] Database updated successfully!`);
       
+      console.log(`📊 [${requestId}] Recording usage statistics...`);
       await storage.updateApiKeyUsage(req.apiKey!.id);
+      const totalTime = Date.now() - startTime;
       await storage.createUsageStats({
         userId: req.apiKey!.userId,
         apiKeyId: req.apiKey!.id,
         endpoint: "/song",
-        responseTime: Date.now() - startTime,
+        responseTime: totalTime,
         statusCode: 200
       });
+      
+      console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (NEW DOWNLOAD) =====`);
+      console.log(`🎵 [${requestId}] Total processing time: ${totalTime}ms`);
+      console.log(`🎵 [${requestId}] Final stream URL: ${updatedDownload.downloadUrl}`);
       
       res.json({
         status: "done",
@@ -206,6 +259,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
     } catch (error: any) {
+      console.log(`💥 [${requestId}] ===== AUDIO REQUEST FAILED =====`);
+      console.log(`💥 [${requestId}] Error: ${error.message}`);
+      console.log(`💥 [${requestId}] Stack: ${error.stack}`);
+      console.log(`💥 [${requestId}] Failed after: ${Date.now() - startTime}ms`);
+      
       if (req.apiKey) {
         await storage.createUsageStats({
           userId: req.apiKey.userId,
