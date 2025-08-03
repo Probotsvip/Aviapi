@@ -1,0 +1,11 @@
+# Ignore Python files to avoid Python buildpack detection
+*.py
+attached_assets/
+downloads/
+admin_cookies.txt
+config_tubeapi.py
+runtime.txt
+test_*.js
+test_*.html
+*.md
+.replit

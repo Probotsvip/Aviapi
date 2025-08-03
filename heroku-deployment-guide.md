@@ -4,6 +4,14 @@
 
 [![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy)
 
+**Note:** If you get Python buildpack error, run this first:
+```bash
+# Move Python files temporarily
+mkdir temp_backup
+mv *.py temp_backup/ 2>/dev/null || echo "No Python files"
+git add . && git commit -m "Remove Python files for Heroku"
+```
+
 ## Manual Deployment Steps
 
 ### 1. Install Heroku CLI
@@ -43,6 +51,10 @@ heroku config:set JWT_SECRET=$(openssl rand -base64 32)
 ```bash
 # Add Heroku remote
 heroku git:remote -a your-tubeapi-app-name
+
+# Set Node.js buildpack explicitly (to avoid Python detection)
+heroku buildpacks:clear
+heroku buildpacks:add heroku/nodejs
 
 # Deploy
 git add .

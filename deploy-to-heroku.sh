@@ -54,9 +54,23 @@ heroku git:remote -a $APP_NAME || echo "⚠️  Remote might already exist, cont
 
 echo ""
 echo "🚢 Deploying to Heroku..."
+# Move Python files to prevent buildpack confusion
+mkdir -p temp_python_files
+mv *.py temp_python_files/ 2>/dev/null || echo "No Python files to move"
+mv config_tubeapi.py temp_python_files/ 2>/dev/null || echo "No config file to move"
+
 git add .
-git commit -m "Deploy TubeAPI to Heroku" || echo "⚠️  Nothing to commit, continuing..."
+git commit -m "Deploy TubeAPI to Heroku (Node.js only)" || echo "⚠️  Nothing to commit, continuing..."
+
+# Set buildpack explicitly
+heroku buildpacks:clear --app $APP_NAME
+heroku buildpacks:add heroku/nodejs --app $APP_NAME
+
 git push heroku main || git push heroku master
+
+# Restore Python files after deployment
+mv temp_python_files/* . 2>/dev/null || echo "No files to restore"
+rmdir temp_python_files 2>/dev/null || echo "Directory already clean"
 
 echo ""
 echo "🗃️  Running database migration..."

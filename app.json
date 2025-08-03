@@ -4,7 +4,7 @@
   "repository": "https://github.com/your-username/tubeapi",
   "logo": "https://cdn-icons-png.flaticon.com/512/1384/1384060.png",
   "keywords": ["youtube", "api", "downloader", "telegram", "nodejs", "express"],
-  "stack": "heroku-22",
+  "stack": "heroku-24",
   "buildpacks": [
     {
       "url": "heroku/nodejs"
