@@ -7,7 +7,7 @@ interface TelegramFile {
 }
 
 class TelegramService {
-  private bot: Telegraf;
+  private bot: Telegraf | null = null;
   private channelId: string;
 
   constructor() {
@@ -27,95 +27,94 @@ class TelegramService {
   async uploadAudio(audioBuffer: Buffer, title: string): Promise<TelegramFile | null> {
     try {
       if (!this.bot) {
-        // Fallback to demo mode if bot initialization failed
-        const mockMessageId = Math.floor(Math.random() * 1000000);
-        return {
-          messageId: mockMessageId.toString(),
-          fileId: `demo_audio_${mockMessageId}`,
-          downloadUrl: `https://demo.tubeapi.dev/files/audio_${mockMessageId}.mp3`
-        };
+        throw new Error("Telegram bot not configured - please provide TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID");
       }
 
+      // Ensure filename is safe
+      const safeTitle = title.replace(/[<>:"/\\|?*]/g, '_').substring(0, 50);
+      
       const message = await this.bot.telegram.sendAudio(this.channelId, {
         source: audioBuffer,
-        filename: `${title}.mp3`
+        filename: `${safeTitle}.mp3`
       }, {
-        caption: title,
-        performer: "YouTube",
-        title: title
+        caption: `🎵 ${title}`,
+        performer: "TubeAPI",
+        title: title,
+        duration: undefined // Let Telegram detect
       });
 
       if (message.audio) {
+        const downloadUrl = await this.getDirectDownloadUrl(message.audio.file_id);
         return {
           messageId: message.message_id.toString(),
           fileId: message.audio.file_id,
-          downloadUrl: `https://t.me/c/${this.channelId.replace('-100', '')}/${message.message_id}`
+          downloadUrl: downloadUrl || `https://t.me/c/${this.channelId.replace('-100', '')}/${message.message_id}`
         };
       }
       
       return null;
     } catch (error) {
       console.error("Failed to upload audio to Telegram:", error);
-      // Return demo response on error
-      const mockMessageId = Math.floor(Math.random() * 1000000);
-      return {
-        messageId: mockMessageId.toString(),
-        fileId: `demo_audio_${mockMessageId}`,
-        downloadUrl: `https://demo.tubeapi.dev/files/audio_${mockMessageId}.mp3`
-      };
+      throw error; // Don't return fake data - throw the real error
     }
   }
 
   async uploadVideo(videoBuffer: Buffer, title: string): Promise<TelegramFile | null> {
     try {
       if (!this.bot) {
-        // Fallback to demo mode if bot initialization failed
-        const mockMessageId = Math.floor(Math.random() * 1000000);
-        return {
-          messageId: mockMessageId.toString(),
-          fileId: `demo_video_${mockMessageId}`,
-          downloadUrl: `https://demo.tubeapi.dev/files/video_${mockMessageId}.mp4`
-        };
+        throw new Error("Telegram bot not configured - please provide TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID");
       }
+
+      // Ensure filename is safe
+      const safeTitle = title.replace(/[<>:"/\\|?*]/g, '_').substring(0, 50);
+      
+      const fileSizeMB = videoBuffer.length / (1024 * 1024);
+      console.log(`Uploading video: ${safeTitle} (${fileSizeMB.toFixed(1)} MB)`);
 
       const message = await this.bot.telegram.sendVideo(this.channelId, {
         source: videoBuffer,
-        filename: `${title}.mp4`
+        filename: `${safeTitle}.mp4`
       }, {
-        caption: title
+        caption: `🎬 ${title}`,
+        supports_streaming: true
       });
 
       if (message.video) {
+        const downloadUrl = await this.getDirectDownloadUrl(message.video.file_id);
         return {
           messageId: message.message_id.toString(),
           fileId: message.video.file_id,
-          downloadUrl: `https://t.me/c/${this.channelId.replace('-100', '')}/${message.message_id}`
+          downloadUrl: downloadUrl || `https://t.me/c/${this.channelId.replace('-100', '')}/${message.message_id}`
         };
       }
       
       return null;
     } catch (error) {
       console.error("Failed to upload video to Telegram:", error);
-      // Return demo response on error
-      const mockMessageId = Math.floor(Math.random() * 1000000);
-      return {
-        messageId: mockMessageId.toString(),
-        fileId: `demo_video_${mockMessageId}`,
-        downloadUrl: `https://demo.tubeapi.dev/files/video_${mockMessageId}.mp4`
-      };
+      throw error; // Don't return fake data - throw the real error
     }
   }
 
   async getFileUrl(fileId: string): Promise<string | null> {
     try {
       if (!this.bot) {
-        return `https://demo.tubeapi.dev/files/${fileId}`;
+        throw new Error("Telegram bot not configured");
       }
 
       const file = await this.bot.telegram.getFile(fileId);
-      return `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+      const botToken = process.env.TELEGRAM_BOT_TOKEN || "7412125068:AAE_xef9Tgq0MZXpknz3-WPPKK7hl6t3im0";
+      return `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
     } catch (error) {
       console.error("Failed to get file URL:", error);
+      return null;
+    }
+  }
+
+  private async getDirectDownloadUrl(fileId: string): Promise<string | null> {
+    try {
+      return await this.getFileUrl(fileId);
+    } catch (error) {
+      console.error("Failed to get direct download URL:", error);
       return null;
     }
   }

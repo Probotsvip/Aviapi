@@ -55,7 +55,7 @@ export async function authenticateApiKey(req: Request, res: Response, next: Next
     }
     
     // Check usage limit
-    if (key.usageCount >= key.usageLimit) {
+    if ((key.usageCount || 0) >= (key.usageLimit || 0)) {
       return res.status(429).json({ error: "API key usage limit exceeded" });
     }
     

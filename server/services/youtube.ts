@@ -3,6 +3,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
+import { randomBytes } from "crypto";
 
 const execAsync = promisify(exec);
 
@@ -13,18 +14,48 @@ interface VideoInfo {
 }
 
 class YouTubeService {
+  private tempDir = "/tmp/tubeapi";
+
+  constructor() {
+    // Ensure temp directory exists
+    this.ensureTempDir();
+  }
+
+  private async ensureTempDir() {
+    try {
+      await fs.mkdir(this.tempDir, { recursive: true });
+    } catch (error) {
+      console.error("Failed to create temp directory:", error);
+    }
+  }
+
   async getVideoInfo(videoId: string): Promise<VideoInfo | null> {
     try {
       const url = `https://www.youtube.com/watch?v=${videoId}`;
-      const info = await ytdl.getInfo(url);
       
-      const duration = this.formatDuration(parseInt(info.videoDetails.lengthSeconds));
-      
-      return {
-        title: info.videoDetails.title,
-        duration,
-        thumbnail: info.videoDetails.thumbnails[0]?.url || ""
-      };
+      // Try with yt-dlp first for better reliability
+      try {
+        const { stdout } = await execAsync(`yt-dlp --dump-json "${url}"`);
+        const info = JSON.parse(stdout);
+        
+        return {
+          title: this.sanitizeTitle(info.title || `Video_${videoId}`),
+          duration: this.formatDuration(info.duration || 0),
+          thumbnail: info.thumbnail || ""
+        };
+      } catch (ytDlpError) {
+        console.warn("yt-dlp failed, falling back to ytdl-core:", ytDlpError);
+        
+        // Fallback to ytdl-core
+        const info = await ytdl.getInfo(url);
+        const duration = this.formatDuration(parseInt(info.videoDetails.lengthSeconds));
+        
+        return {
+          title: this.sanitizeTitle(info.videoDetails.title || `Video_${videoId}`),
+          duration,
+          thumbnail: info.videoDetails.thumbnails[0]?.url || ""
+        };
+      }
     } catch (error) {
       console.error("Failed to get video info:", error);
       return null;
@@ -33,17 +64,34 @@ class YouTubeService {
 
   async downloadAudio(videoId: string): Promise<Buffer | null> {
     try {
-      // For demo purposes, create a small dummy audio buffer
-      // In production, this would use yt-dlp to download actual audio
-      console.log(`Demo: Downloading audio for video ${videoId}`);
+      const url = `https://www.youtube.com/watch?v=${videoId}`;
+      const fileName = `audio_${videoId}_${randomBytes(4).toString('hex')}`;
+      const outputPath = path.join(this.tempDir, fileName);
       
-      // Create a small dummy buffer to simulate audio file
-      const dummyAudio = Buffer.from("dummy-audio-data-for-demo-purposes");
+      console.log(`Downloading high-quality audio for video ${videoId}`);
       
-      // Simulate some processing time
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Download highest quality audio with yt-dlp
+      const command = `yt-dlp -f "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio" --extract-audio --audio-format mp3 --audio-quality 0 -o "${outputPath}.%(ext)s" "${url}"`;
       
-      return dummyAudio;
+      await execAsync(command, { timeout: 300000 }); // 5 minute timeout
+      
+      // Find the downloaded file (yt-dlp may change extension)
+      const files = await fs.readdir(this.tempDir);
+      const audioFile = files.find(f => f.startsWith(fileName));
+      
+      if (!audioFile) {
+        throw new Error("Downloaded file not found");
+      }
+      
+      const fullPath = path.join(this.tempDir, audioFile);
+      const buffer = await fs.readFile(fullPath);
+      
+      // Clean up temp file
+      await fs.unlink(fullPath).catch(() => {});
+      
+      console.log(`Audio download completed: ${buffer.length} bytes`);
+      return buffer;
+      
     } catch (error) {
       console.error("Failed to download audio:", error);
       return null;
@@ -52,17 +100,56 @@ class YouTubeService {
 
   async downloadVideo(videoId: string, quality: string = "720p"): Promise<Buffer | null> {
     try {
-      // For demo purposes, create a small dummy video buffer
-      // In production, this would use yt-dlp to download actual video
-      console.log(`Demo: Downloading video for ${videoId} at ${quality}`);
+      const url = `https://www.youtube.com/watch?v=${videoId}`;
+      const fileName = `video_${videoId}_${randomBytes(4).toString('hex')}`;
+      const outputPath = path.join(this.tempDir, fileName);
       
-      // Create a small dummy buffer to simulate video file
-      const dummyVideo = Buffer.from("dummy-video-data-for-demo-purposes");
+      console.log(`Downloading high-quality video for ${videoId} at ${quality}`);
       
-      // Simulate some processing time
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Map quality to yt-dlp format selector
+      let formatSelector = "best[ext=mp4]";
+      switch (quality) {
+        case "4K":
+        case "2160p":
+          formatSelector = "best[height<=2160][ext=mp4]/best[ext=mp4]";
+          break;
+        case "1440p":
+          formatSelector = "best[height<=1440][ext=mp4]/best[ext=mp4]";
+          break;
+        case "1080p":
+          formatSelector = "best[height<=1080][ext=mp4]/best[ext=mp4]";
+          break;
+        case "720p":
+          formatSelector = "best[height<=720][ext=mp4]/best[ext=mp4]";
+          break;
+        case "480p":
+          formatSelector = "best[height<=480][ext=mp4]/best[ext=mp4]";
+          break;
+        default:
+          formatSelector = "best[ext=mp4]";
+      }
       
-      return dummyVideo;
+      const command = `yt-dlp -f "${formatSelector}" -o "${outputPath}.%(ext)s" "${url}"`;
+      
+      await execAsync(command, { timeout: 600000 }); // 10 minute timeout for video
+      
+      // Find the downloaded file
+      const files = await fs.readdir(this.tempDir);
+      const videoFile = files.find(f => f.startsWith(fileName));
+      
+      if (!videoFile) {
+        throw new Error("Downloaded file not found");
+      }
+      
+      const fullPath = path.join(this.tempDir, videoFile);
+      const buffer = await fs.readFile(fullPath);
+      
+      // Clean up temp file
+      await fs.unlink(fullPath).catch(() => {});
+      
+      console.log(`Video download completed: ${buffer.length} bytes`);
+      return buffer;
+      
     } catch (error) {
       console.error("Failed to download video:", error);
       return null;
@@ -70,9 +157,23 @@ class YouTubeService {
   }
 
   private formatDuration(seconds: number): string {
-    const mins = Math.floor(seconds / 60);
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
+    
+    if (hours > 0) {
+      return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  private sanitizeTitle(title: string): string {
+    // Remove special characters that might cause issues
+    return title
+      .replace(/[<>:"/\\|?*]/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 100); // Limit length
   }
 }
 
