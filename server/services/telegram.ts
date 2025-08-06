@@ -20,7 +20,7 @@ class TelegramService {
   private channelId: string;
 
   constructor() {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN || "7412125068:AAE_xef9Tgq0MZXpknz3-WPPKK7hl6t3im0";
+    const botToken = process.env.TELEGRAM_BOT_TOKEN || "7322756571:AAFe906CdE-qEgqlf1d956KmYOwFN_M4Avo";
     const channelId = process.env.TELEGRAM_CHANNEL_ID || "-1002863131570";
     
     if (botToken && channelId) {
