@@ -362,6 +362,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Upload a test message to channel for verification
+  app.post("/api/test-upload", async (req, res) => {
+    try {
+      const botToken = '7322756571:AAFe906CdE-qEgqlf1d956KmYOwFN_M4Avo';
+      const channelId = '-1002863131570';
+      
+      const testMessage = `🎵 Test Upload for DoaE_6Y2_8I
+      
+📱 #AUDIO #MP3 #DoaE_6Y2_8I
+🎬 Video ID: DoaE_6Y2_8I
+⏱️ Duration: 3:45
+📊 Size: 5.2 MB
+🔗 Stream Type: Audio
+📅 Uploaded: ${new Date().toISOString().split('T')[0]}
+
+#TubeAPI #YouTubeAudio #StreamReady`;
+
+      const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: channelId,
+          text: testMessage
+        })
+      });
+
+      const data = await response.json();
+      console.log(`📤 Test message uploaded:`, data);
+      
+      res.json({
+        success: true,
+        message: "Test message uploaded to channel",
+        telegram_response: data
+      });
+      
+    } catch (error: any) {
+      console.error(`❌ Upload error:`, error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
   // Check what's available in Telegram channel
   app.get("/api/test-channel-content", async (req, res) => {
     const startTime = Date.now();
