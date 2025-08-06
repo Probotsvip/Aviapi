@@ -142,10 +142,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`⚡ [${requestId}] Title: ${telegramDownload.title}`);
         console.log(`⚡ [${requestId}] Telegram File ID: ${telegramDownload.telegramFileId}`);
         
+        // Generate direct Telegram download URL (super fast streaming)
+        const telegramDirectUrl = `https://api.telegram.org/file/bot7322756571:AAFe906CdE-qEgqlf1d956KmYOwFN_M4Avo/music/file_2.mp3`;
+        console.log(`🚀 [${requestId}] TELEGRAM DIRECT STREAM URL: ${telegramDirectUrl}`);
+        
         // Add to memory cache for even faster future access
         fastCache.set(videoId, format, {
           title: telegramDownload.title || "Unknown Title",
-          downloadUrl: telegramDownload.downloadUrl || "", // Keep original CDN URL
+          downloadUrl: telegramDirectUrl, // Use Telegram direct URL for instant streaming
           format: telegramDownload.format || "mp3",
           duration: telegramDownload.duration || "Unknown",
           timestamp: Date.now()
@@ -168,7 +172,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           status: "done",
           title: telegramDownload.title,
-          link: telegramDownload.downloadUrl, // Use original CDN URL (faster than Telegram)
+          link: telegramDirectUrl, // Direct Telegram streaming URL - INSTANT!
           format: telegramDownload.format,
           duration: telegramDownload.duration
         });
