@@ -316,6 +316,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Test Telegram search directly (no auth required)
+  app.get("/api/test-telegram/:videoId", async (req, res) => {
+    const startTime = Date.now();
+    const { videoId } = req.params;
+    const format = req.query.format as string || "mp3";
+    
+    console.log(`🔍 Testing Telegram search for: ${videoId}.${format}`);
+    
+    try {
+      const telegramSearchService = getTelegramSearchService();
+      const result = await telegramSearchService.findExistingFile(videoId, format as 'mp3' | 'mp4');
+      
+      const responseTime = Date.now() - startTime;
+      
+      if (result && result.download_url) {
+        console.log(`✅ Found in Telegram channel: ${result.title}`);
+        res.json({
+          success: true,
+          found: true,
+          title: result.title,
+          download_url: result.download_url,
+          file_id: result.file_id,
+          duration: result.duration,
+          file_size: result.file_size,
+          message_id: result.message_id,
+          response_time: responseTime
+        });
+      } else {
+        console.log(`❌ Not found in Telegram channel`);
+        res.json({
+          success: true,
+          found: false,
+          message: "Video not found in Telegram channel",
+          response_time: responseTime
+        });
+      }
+    } catch (error: any) {
+      console.error(`❌ Telegram search error:`, error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        response_time: Date.now() - startTime
+      });
+    }
+  });
+
   // Create HTTP server
   const server = createServer(app);
   
