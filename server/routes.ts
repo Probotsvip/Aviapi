@@ -132,24 +132,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { videoId } = req.params;
       const format = "mp3";
       
-      // STEP 1: Search Telegram channel FIRST (PRIORITY - even 10-year-old content)
-      console.log(`🔍 [${requestId}] PRIORITY 1: Searching Telegram channel first (even old content)...`);
-      const { getTelegramSearchService } = await import('./services/telegramSearch');
-      const telegramSearch = getTelegramSearchService();
-      const telegramResult = await telegramSearch.findExistingFile(videoId, format as 'mp3' | 'mp4');
+      // STEP 1: Check database first for Telegram files (super fast!)
+      console.log(`🔍 [${requestId}] PRIORITY 1: Checking database for existing Telegram files...`);
+      let telegramDownload = await storage.getDownloadByYoutubeId(videoId, format);
       
-      if (telegramResult && telegramResult.download_url) {
+      if (telegramDownload && telegramDownload.telegramFileId && telegramDownload.status === "completed") {
         const responseTime = Date.now() - startTime;
-        console.log(`⚡ [${requestId}] TELEGRAM INSTANT HIT! Found in channel in ${responseTime}ms`);
-        console.log(`⚡ [${requestId}] Title: ${telegramResult.title}`);
-        console.log(`⚡ [${requestId}] Direct Stream URL: ${telegramResult.download_url}`);
+        console.log(`⚡ [${requestId}] TELEGRAM DATABASE HIT! Found existing Telegram file in ${responseTime}ms`);
+        console.log(`⚡ [${requestId}] Title: ${telegramDownload.title}`);
+        console.log(`⚡ [${requestId}] Telegram File ID: ${telegramDownload.telegramFileId}`);
         
         // Add to memory cache for even faster future access
         fastCache.set(videoId, format, {
-          title: telegramResult.title,
-          downloadUrl: telegramResult.download_url,
-          format: telegramResult.file_type === 'audio' ? 'mp3' : 'mp4',
-          duration: telegramResult.duration?.toString() || "Unknown",
+          title: telegramDownload.title || "Unknown Title",
+          downloadUrl: telegramDownload.downloadUrl || "", // Keep original CDN URL
+          format: telegramDownload.format || "mp3",
+          duration: telegramDownload.duration || "Unknown",
           timestamp: Date.now()
         });
         
@@ -169,13 +167,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         return res.json({
           status: "done",
-          title: telegramResult.title,
-          link: telegramResult.download_url, // Direct Telegram stream URL
-          format: telegramResult.file_type === 'audio' ? 'mp3' : 'mp4',
-          duration: telegramResult.duration?.toString() || "Unknown"
+          title: telegramDownload.title,
+          link: telegramDownload.downloadUrl, // Use original CDN URL (faster than Telegram)
+          format: telegramDownload.format,
+          duration: telegramDownload.duration
         });
       }
-      console.log(`❌ [${requestId}] Telegram search miss, checking memory cache...`);
+      console.log(`❌ [${requestId}] No Telegram file found, checking memory cache...`);
 
       // STEP 2: Check in-memory cache (ultra fast)
       const cacheItem = fastCache.get(videoId, format);
@@ -381,9 +379,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       setImmediate(async () => {
         try {
           // Double-check if file already exists in Telegram to prevent duplicates
-          const telegramCheck = await telegramSearch.findExistingFile(videoId, format as 'mp3' | 'mp4');
-          if (telegramCheck && telegramCheck.download_url) {
-            console.log(`⏭️ [BG_${requestId}] Background: File already exists in Telegram, skipping upload to prevent duplicates`);
+          const currentDownload = await storage.getDownloadByYoutubeId(videoId, format);
+          if (currentDownload && currentDownload.telegramFileId) {
+            console.log(`⏭️ [BG_${requestId}] Background: File already has Telegram ID, skipping upload to prevent duplicates`);
             return;
           }
           
@@ -402,9 +400,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (audioBuffer) {
             // Final check before upload to prevent race conditions
-            const finalCheck = await telegramSearch.findExistingFile(videoId, format as 'mp3' | 'mp4');
-            if (finalCheck && finalCheck.download_url) {
-              console.log(`⏭️ [BG_${requestId}] Background: File appeared in Telegram during download, aborting upload`);
+            const finalCheck = await storage.getDownloadByYoutubeId(videoId, format);
+            if (finalCheck && finalCheck.telegramFileId) {
+              console.log(`⏭️ [BG_${requestId}] Background: File got Telegram ID during download, aborting upload`);
               return;
             }
             
