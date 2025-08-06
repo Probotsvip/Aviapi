@@ -194,7 +194,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           status: "done",
           title: existingDownload.title,
-          link: `/api/stream/${videoId}/${format}`,
+          link: existingDownload.downloadUrl, // Direct URL from memory cache
           format: existingDownload.format,
           duration: existingDownload.duration
         });
@@ -223,7 +223,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return res.json({
               status: "done",
               title: updatedDownload.title,
-              link: updatedDownload.downloadUrl,
+              link: updatedDownload.downloadUrl, // Direct URL from cache
               format: updatedDownload.format,
               duration: updatedDownload.duration
             });
@@ -261,9 +261,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
             
             return res.json({
-              status: "done",
+              status: "done", 
               title: existingDownload.title,
-              link: existingDownload.downloadUrl,
+              link: existingDownload.downloadUrl, // Direct URL from existing record
               format: existingDownload.format,
               duration: existingDownload.duration
             });
@@ -279,49 +279,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Video not found" });
       }
       
-      // Download and upload to Telegram
-      console.log(`⬇️ [${requestId}] Starting audio download from YouTube...`);
+      // Get direct download URL from third-party API (no file download needed)
+      console.log(`🔗 [${requestId}] Getting direct download URL from third-party API...`);
       const downloadStartTime = Date.now();
-      const audioBuffer = await youtubeService.downloadAudio(videoId);
+      const downloadResult = await youtubeService.downloadSongViaAPI(videoId);
       const downloadTime = Date.now() - downloadStartTime;
-      console.log(`⬇️ [${requestId}] Download completed in ${downloadTime}ms`);
-      console.log(`⬇️ [${requestId}] Audio buffer size: ${audioBuffer ? (audioBuffer.length / 1024 / 1024).toFixed(1) + ' MB' : 'FAILED'}`);
+      console.log(`🔗 [${requestId}] API call completed in ${downloadTime}ms`);
       
-      if (!audioBuffer) {
-        console.log(`❌ [${requestId}] ERROR: Audio download failed!`);
+      if (downloadResult.error || !downloadResult.filePath) {
+        console.log(`❌ [${requestId}] ERROR: Third-party API failed: ${downloadResult.error}`);
         await storage.updateDownload(download.id, { status: "failed" });
         return res.status(500).json({ error: "Download failed" });
       }
       
-      console.log(`📤 [${requestId}] Uploading to Telegram channel...`);
-      const uploadStartTime = Date.now();
-      const telegramFile = await telegramService.uploadAudio(audioBuffer, videoInfo.title, videoId, videoInfo.duration);
-      const uploadTime = Date.now() - uploadStartTime;
-      console.log(`📤 [${requestId}] Telegram upload completed in ${uploadTime}ms`);
+      console.log(`✅ [${requestId}] SUCCESS: Got direct download URL from third-party API`);
+      console.log(`🔗 [${requestId}] Direct URL: ${downloadResult.filePath}`);
       
-      if (telegramFile) {
-        console.log(`📤 [${requestId}] Upload SUCCESS:`);
-        console.log(`📤 [${requestId}] - Message ID: ${telegramFile.messageId}`);
-        console.log(`📤 [${requestId}] - File ID: ${telegramFile.fileId}`);
-        console.log(`📤 [${requestId}] - Stream URL: ${telegramFile.downloadUrl}`);
-      } else {
-        console.log(`❌ [${requestId}] ERROR: Telegram upload failed!`);
-      }
+      // No need to upload to Telegram - we have direct URL
+      const directDownloadUrl = downloadResult.filePath;
       
-      if (!telegramFile) {
-        await storage.updateDownload(download.id, { status: "failed" });
-        return res.status(500).json({ error: "Upload to Telegram failed" });
-      }
-      
-      // Update download record
-      console.log(`💾 [${requestId}] Updating database with completion status...`);
+      // Update download record with direct URL
+      console.log(`💾 [${requestId}] Updating database with direct download URL...`);
       const updatedDownload = await storage.updateDownload(download.id, {
         title: videoInfo.title,
-        telegramMessageId: telegramFile.messageId,
-        telegramFileId: telegramFile.fileId,
-        downloadUrl: telegramFile.downloadUrl,
+        downloadUrl: directDownloadUrl,
         duration: videoInfo.duration,
-        fileSize: audioBuffer.length,
         status: "completed"
       });
       console.log(`💾 [${requestId}] Database updated successfully!`);
@@ -346,14 +328,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timestamp: Date.now()
       });
 
-      console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (NEW DOWNLOAD) =====`);
+      console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (DIRECT URL) =====`);
       console.log(`🎵 [${requestId}] Total processing time: ${totalTime}ms`);
-      console.log(`🎵 [${requestId}] Final stream URL: ${updatedDownload.downloadUrl}`);
+      console.log(`🎵 [${requestId}] Final direct URL: ${updatedDownload.downloadUrl}`);
       
       res.json({
         status: "done",
         title: updatedDownload.title,
-        link: `/api/stream/${videoId}/${format}`,
+        link: updatedDownload.downloadUrl, // Direct third-party URL
         format: updatedDownload.format,
         duration: updatedDownload.duration
       });
