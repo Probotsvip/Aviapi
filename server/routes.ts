@@ -279,7 +279,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Video not found" });
       }
       
-      // Get direct download URL from third-party API (no file download needed)
+      // Get direct download URL from third-party API (INSTANT RESPONSE)
       console.log(`🔗 [${requestId}] Getting direct download URL from third-party API...`);
       const downloadStartTime = Date.now();
       const downloadResult = await youtubeService.downloadSongViaAPI(videoId);
@@ -295,10 +295,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`✅ [${requestId}] SUCCESS: Got direct download URL from third-party API`);
       console.log(`🔗 [${requestId}] Direct URL: ${downloadResult.filePath}`);
       
-      // No need to upload to Telegram - we have direct URL
       const directDownloadUrl = downloadResult.filePath;
       
-      // Update download record with direct URL
+      // Update database with direct URL IMMEDIATELY
       console.log(`💾 [${requestId}] Updating database with direct download URL...`);
       const updatedDownload = await storage.updateDownload(download.id, {
         title: videoInfo.title,
@@ -308,18 +307,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       console.log(`💾 [${requestId}] Database updated successfully!`);
       
-      console.log(`📊 [${requestId}] Recording usage statistics...`);
-      await storage.updateApiKeyUsage(req.apiKey!.id);
-      const totalTime = Date.now() - startTime;
-      await storage.createUsageStats({
-        userId: req.apiKey!.userId,
-        apiKeyId: req.apiKey!.id,
-        endpoint: "/song",
-        responseTime: totalTime,
-        statusCode: 200
-      });
-      
-      // Add to memory cache for next time
+      // Add to memory cache immediately
       fastCache.set(videoId, format, {
         title: updatedDownload.title || "Unknown Title",
         downloadUrl: updatedDownload.downloadUrl || "",
@@ -328,16 +316,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timestamp: Date.now()
       });
 
-      console.log(`🎵 [${requestId}] ===== AUDIO REQUEST COMPLETED (DIRECT URL) =====`);
-      console.log(`🎵 [${requestId}] Total processing time: ${totalTime}ms`);
-      console.log(`🎵 [${requestId}] Final direct URL: ${updatedDownload.downloadUrl}`);
+      // INSTANT RESPONSE TO USER - Don't make them wait!
+      const totalTime = Date.now() - startTime;
+      console.log(`🚀 [${requestId}] ===== INSTANT RESPONSE TO USER =====`);
+      console.log(`🚀 [${requestId}] Response time: ${totalTime}ms (DIRECT API URL)`);
+      console.log(`🚀 [${requestId}] Direct URL: ${updatedDownload.downloadUrl}`);
       
+      // Send response immediately
       res.json({
         status: "done",
         title: updatedDownload.title,
         link: updatedDownload.downloadUrl, // Direct third-party URL
         format: updatedDownload.format,
         duration: updatedDownload.duration
+      });
+
+      // BACKGROUND PROCESSING: Download and upload to Telegram for future caching
+      console.log(`🔄 [${requestId}] Starting background Telegram upload for future caching...`);
+      setImmediate(async () => {
+        try {
+          console.log(`📥 [BG_${requestId}] Background: Starting file download from third-party URL...`);
+          const bgStartTime = Date.now();
+          const audioBuffer = await youtubeService.downloadAudio(videoId);
+          const bgDownloadTime = Date.now() - bgStartTime;
+          console.log(`📥 [BG_${requestId}] Background: Download completed in ${bgDownloadTime}ms`);
+          
+          if (audioBuffer) {
+            console.log(`📤 [BG_${requestId}] Background: Uploading to Telegram channel...`);
+            const bgUploadStartTime = Date.now();
+            const telegramFile = await telegramService.uploadAudio(audioBuffer, videoInfo.title, videoId, videoInfo.duration);
+            const bgUploadTime = Date.now() - bgUploadStartTime;
+            console.log(`📤 [BG_${requestId}] Background: Telegram upload completed in ${bgUploadTime}ms`);
+            
+            if (telegramFile) {
+              // Update database with Telegram info for future use
+              await storage.updateDownload(download.id, {
+                telegramMessageId: telegramFile.messageId,
+                telegramFileId: telegramFile.fileId,
+                fileSize: audioBuffer.length
+              });
+              console.log(`✅ [BG_${requestId}] Background: Database updated with Telegram info for future use`);
+              console.log(`🎵 [BG_${requestId}] Background: Total background time: ${Date.now() - bgStartTime}ms`);
+            }
+          } else {
+            console.log(`⚠️ [BG_${requestId}] Background: Audio download failed, but user already got direct URL`);
+          }
+        } catch (bgError: any) {
+          console.log(`⚠️ [BG_${requestId}] Background: Error during background processing: ${bgError.message}`);
+          console.log(`⚠️ [BG_${requestId}] Background: This is OK - user already got direct URL response`);
+        }
+      });
+
+      // Update usage stats in background
+      setImmediate(async () => {
+        try {
+          await storage.updateApiKeyUsage(req.apiKey!.id);
+          await storage.createUsageStats({
+            userId: req.apiKey!.userId,
+            apiKeyId: req.apiKey!.id,
+            endpoint: "/song",
+            responseTime: totalTime,
+            statusCode: 200
+          });
+        } catch (error: any) {
+          console.log(`⚠️ [BG_${requestId}] Background: Usage stats update failed: ${error.message}`);
+        }
       });
       
     } catch (error: any) {
