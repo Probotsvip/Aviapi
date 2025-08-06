@@ -85,94 +85,59 @@ export class TelegramSearchService {
     }
   }
 
-  // Search channel messages by getting chat history directly
+  // Search channel messages using getUpdates (only working method for bots)
   private async searchRecentMessages(videoId: string, limit: number = 100): Promise<TelegramMessage[]> {
-    // Try multiple approaches to search the channel
-    const searchMethods = [
-      this.searchUsingChatHistory.bind(this),
-      this.searchUsingGetUpdates.bind(this)
-    ];
+    console.log(`🔍 Searching for ${videoId} in recent messages...`);
     
-    for (const searchMethod of searchMethods) {
-      try {
-        console.log(`🔍 Trying search method for ${videoId}...`);
-        const messages = await searchMethod(videoId, limit);
-        if (messages.length > 0) {
-          console.log(`✅ Found ${messages.length} messages using this method`);
-          return messages;
-        }
-      } catch (error) {
-        console.log(`⚠️ Search method failed: ${error}, trying next method...`);
-        continue;
+    try {
+      const url = `https://api.telegram.org/bot${this.config.botToken}/getUpdates`;
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          limit: limit,
+          allowed_updates: ['channel_post'],
+          timeout: 10
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`getUpdates API error: ${response.status}`);
       }
+
+      const data = await response.json() as any;
+      
+      if (!data.ok) {
+        throw new Error(`getUpdates error: ${data.description}`);
+      }
+
+      console.log(`📨 Received ${data.result.length} updates from Telegram`);
+      
+      // Filter for channel posts and search for video ID
+      const matchingMessages = data.result
+        .filter((update: any) => update.channel_post)
+        .map((update: any) => update.channel_post)
+        .filter((message: TelegramMessage) => {
+          const text = message.text || message.caption || '';
+          const hasVideoId = text.toLowerCase().includes(videoId.toLowerCase());
+          
+          if (hasVideoId) {
+            console.log(`✅ Found matching message: ${message.message_id}`);
+            console.log(`📝 Text/Caption: ${text.substring(0, 100)}...`);
+          }
+          
+          return hasVideoId;
+        })
+        .reverse();
+
+      console.log(`🎯 Found ${matchingMessages.length} matching messages for ${videoId}`);
+      return matchingMessages;
+      
+    } catch (error) {
+      console.error(`❌ Search error:`, error);
+      return [];
     }
-    
-    console.log(`❌ All search methods failed for ${videoId}`);
-    return [];
-  }
-
-  // Method 1: Search using chat history
-  private async searchUsingChatHistory(videoId: string, limit: number): Promise<TelegramMessage[]> {
-    const url = `https://api.telegram.org/bot${this.config.botToken}/getChatHistory`;
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: this.config.channelId,
-        limit: limit
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`getChatHistory API error: ${response.status}`);
-    }
-
-    const data = await response.json() as any;
-    
-    if (!data.ok) {
-      throw new Error(`getChatHistory error: ${data.description}`);
-    }
-
-    return data.result.messages
-      .filter((message: TelegramMessage) => {
-        const text = message.text || message.caption || '';
-        return text.toLowerCase().includes(videoId.toLowerCase());
-      })
-      .reverse();
-  }
-
-  // Method 2: Search using getUpdates (fallback)
-  private async searchUsingGetUpdates(videoId: string, limit: number): Promise<TelegramMessage[]> {
-    const url = `https://api.telegram.org/bot${this.config.botToken}/getUpdates`;
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        limit: limit,
-        allowed_updates: ['channel_post']
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`getUpdates API error: ${response.status}`);
-    }
-
-    const data = await response.json() as any;
-    
-    if (!data.ok) {
-      throw new Error(`getUpdates error: ${data.description}`);
-    }
-
-    return data.result
-      .filter((update: any) => update.channel_post)
-      .map((update: any) => update.channel_post)
-      .filter((message: TelegramMessage) => {
-        const text = message.text || message.caption || '';
-        return text.toLowerCase().includes(videoId.toLowerCase());
-      })
-      .reverse();
   }
 
   // Parse message to find video content
@@ -273,7 +238,7 @@ let telegramSearchInstance: TelegramSearchService | null = null;
 
 export function getTelegramSearchService(): TelegramSearchService {
   if (!telegramSearchInstance) {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN || '7412125068:AAE_xef9Tgq0MZXpknz3-WPPKK7hl6t3im0';
+    const botToken = process.env.TELEGRAM_BOT_TOKEN || '7322756571:AAFe906CdE-qEgqlf1d956KmYOwFN_M4Avo';
     const channelId = process.env.TELEGRAM_CHANNEL_ID || '-1002863131570';
     
     telegramSearchInstance = new TelegramSearchService({

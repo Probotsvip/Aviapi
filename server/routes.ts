@@ -362,6 +362,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Check what's available in Telegram channel
+  app.get("/api/test-channel-content", async (req, res) => {
+    const startTime = Date.now();
+    
+    console.log(`📋 Checking channel content...`);
+    
+    try {
+      const botToken = '7322756571:AAFe906CdE-qEgqlf1d956KmYOwFN_M4Avo';
+      const url = `https://api.telegram.org/bot${botToken}/getUpdates`;
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          limit: 100,
+          allowed_updates: ['channel_post'],
+          timeout: 10
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json() as any;
+      
+      if (!data.ok) {
+        throw new Error(`Telegram error: ${data.description}`);
+      }
+
+      console.log(`📨 Total updates received: ${data.result.length}`);
+      
+      // Process channel posts
+      const channelPosts = data.result
+        .filter((update: any) => update.channel_post)
+        .map((update: any) => {
+          const post = update.channel_post;
+          const text = post.text || post.caption || '';
+          
+          console.log(`📝 Message ${post.message_id}: ${text.substring(0, 100)}...`);
+          
+          return {
+            message_id: post.message_id,
+            text: text.substring(0, 200),
+            has_audio: !!post.audio,
+            has_video: !!post.video,
+            has_document: !!post.document,
+            file_type: post.audio ? 'audio' : post.video ? 'video' : post.document ? 'document' : 'text'
+          };
+        });
+      
+      const responseTime = Date.now() - startTime;
+      
+      res.json({
+        success: true,
+        total_updates: data.result.length,
+        channel_posts: channelPosts.length,
+        posts: channelPosts,
+        response_time: responseTime
+      });
+      
+    } catch (error: any) {
+      console.error(`❌ Channel content check error:`, error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        response_time: Date.now() - startTime
+      });
+    }
+  });
+
   // Create HTTP server
   const server = createServer(app);
   
