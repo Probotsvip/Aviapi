@@ -38,7 +38,10 @@ export async function authenticateUser(req: Request, res: Response, next: NextFu
 
 export async function authenticateApiKey(req: Request, res: Response, next: NextFunction) {
   try {
-    const apiKey = req.query.api as string;
+    // Support both header and query parameter for API key
+    const apiKey = (req.headers['x-api-key'] as string) || 
+                   (req.headers['X-API-Key'] as string) || 
+                   (req.query.api as string);
     
     if (!apiKey) {
       return res.status(401).json({ error: "API key required" });
