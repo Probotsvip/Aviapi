@@ -133,71 +133,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { videoId } = req.params;
       const format = "mp3";
       
-      // STEP 1: Check if file exists in Telegram (database-assisted approach for reliability)
-      console.log(`🔍 [${requestId}] PRIORITY 1: Checking for existing Telegram files...`);
-      let telegramDownload = await storage.getDownloadByYoutubeId(videoId, format);
+      // STEP 1: ONLY search live Telegram channel (NO DATABASE DEPENDENCY!)
+      console.log(`🔍 [${requestId}] PRIORITY 1: Searching LIVE Telegram channel ONLY (ignoring database)...`);
       
-      if (telegramDownload && telegramDownload.telegramFileId && telegramDownload.status === "completed") {
-        console.log(`⚡ [${requestId}] TELEGRAM FILE FOUND! File ID: ${telegramDownload.telegramFileId}`);
+      try {
+        const telegramSearchService = getTelegramSearchService();
+        const telegramResult = await telegramSearchService.findExistingFile(videoId, format as 'mp3' | 'mp4');
         
-        try {
-          // Get fresh download URL using the file ID (this works even with token changes)
-          const fileInfoUrl = `https://api.telegram.org/bot7322756571:AAFe906CdE-qEgqlf1d956KmYOwFN_M4Avo/getFile`;
-          const response = await fetch(fileInfoUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ file_id: telegramDownload.telegramFileId })
-          });
-
-          if (response.ok) {
-            const data = await response.json() as any;
-            if (data.ok && data.result.file_path) {
-              const telegramDirectUrl = `https://api.telegram.org/file/bot7322756571:AAFe906CdE-qEgqlf1d956KmYOwFN_M4Avo/${data.result.file_path}`;
-              const responseTime = Date.now() - startTime;
-              
-              console.log(`⚡ [${requestId}] TELEGRAM SUCCESS! Fresh download URL generated in ${responseTime}ms`);
-              console.log(`🚀 [${requestId}] Direct Telegram URL: ${telegramDirectUrl}`);
-              
-              // Add to memory cache for faster access next time
-              fastCache.set(videoId, format, {
-                title: telegramDownload.title || "Unknown Title",
-                downloadUrl: telegramDirectUrl,
-                format: format,
-                duration: telegramDownload.duration || "Unknown",
-                timestamp: Date.now()
-              });
-              
-              // Update usage stats in background (non-blocking)
-              setImmediate(() => {
-                Promise.all([
-                  storage.updateApiKeyUsage(req.apiKey!.id),
-                  storage.createUsageStats({
-                    userId: req.apiKey!.userId,
-                    apiKeyId: req.apiKey!.id,
-                    endpoint: "/song",
-                    responseTime: responseTime,
-                    statusCode: 200
-                  })
-                ]).catch(() => {}); // Silent error handling
-              });
-              
-              return res.json({
-                status: "done",
-                title: telegramDownload.title,
-                link: telegramDirectUrl, // Fresh Telegram direct URL!
-                format: format,
-                duration: telegramDownload.duration
-              });
-            }
-          }
+        if (telegramResult && telegramResult.download_url) {
+          const responseTime = Date.now() - startTime;
+          console.log(`⚡ [${requestId}] TELEGRAM CHANNEL HIT! Found file in live channel in ${responseTime}ms`);
+          console.log(`⚡ [${requestId}] Title: ${telegramResult.title}`);
+          console.log(`🚀 [${requestId}] Direct Telegram URL: ${telegramResult.download_url}`);
           
-          console.log(`⚠️ [${requestId}] Could not get fresh Telegram URL, using cached URL`);
-        } catch (error) {
-          console.log(`⚠️ [${requestId}] Telegram API error: ${error}, using cached URL`);
+          // Add to memory cache for faster access next time (NO DATABASE INTERACTION)
+          fastCache.set(videoId, format, {
+            title: telegramResult.title || "Unknown Title",
+            downloadUrl: telegramResult.download_url,
+            format: format,
+            duration: telegramResult.duration?.toString() || "Unknown",
+            timestamp: Date.now()
+          });
+          
+          // Update usage stats in background (non-blocking)
+          setImmediate(() => {
+            Promise.all([
+              storage.updateApiKeyUsage(req.apiKey!.id),
+              storage.createUsageStats({
+                userId: req.apiKey!.userId,
+                apiKeyId: req.apiKey!.id,
+                endpoint: "/song",
+                responseTime: responseTime,
+                statusCode: 200
+              })
+            ]).catch(() => {}); // Silent error handling
+          });
+          
+          return res.json({
+            status: "done",
+            title: telegramResult.title,
+            link: telegramResult.download_url, // Direct from live Telegram channel!
+            format: format,
+            duration: telegramResult.duration?.toString() || "Unknown"
+          });
         }
+        
+        console.log(`❌ [${requestId}] No file found in live Telegram channel, checking memory cache...`);
+      } catch (error) {
+        console.log(`⚠️ [${requestId}] Live Telegram search failed: ${error}, checking memory cache...`);
       }
-      
-      console.log(`❌ [${requestId}] No Telegram file found, checking memory cache...`);
 
       // STEP 2: Check in-memory cache (ultra fast)
       const cacheItem = fastCache.get(videoId, format);

@@ -85,44 +85,94 @@ export class TelegramSearchService {
     }
   }
 
-  // Search recent channel messages using getUpdates
+  // Search channel messages by getting chat history directly
   private async searchRecentMessages(videoId: string, limit: number = 100): Promise<TelegramMessage[]> {
+    // Try multiple approaches to search the channel
+    const searchMethods = [
+      this.searchUsingChatHistory.bind(this),
+      this.searchUsingGetUpdates.bind(this)
+    ];
+    
+    for (const searchMethod of searchMethods) {
+      try {
+        console.log(`🔍 Trying search method for ${videoId}...`);
+        const messages = await searchMethod(videoId, limit);
+        if (messages.length > 0) {
+          console.log(`✅ Found ${messages.length} messages using this method`);
+          return messages;
+        }
+      } catch (error) {
+        console.log(`⚠️ Search method failed: ${error}, trying next method...`);
+        continue;
+      }
+    }
+    
+    console.log(`❌ All search methods failed for ${videoId}`);
+    return [];
+  }
+
+  // Method 1: Search using chat history
+  private async searchUsingChatHistory(videoId: string, limit: number): Promise<TelegramMessage[]> {
+    const url = `https://api.telegram.org/bot${this.config.botToken}/getChatHistory`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: this.config.channelId,
+        limit: limit
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`getChatHistory API error: ${response.status}`);
+    }
+
+    const data = await response.json() as any;
+    
+    if (!data.ok) {
+      throw new Error(`getChatHistory error: ${data.description}`);
+    }
+
+    return data.result.messages
+      .filter((message: TelegramMessage) => {
+        const text = message.text || message.caption || '';
+        return text.toLowerCase().includes(videoId.toLowerCase());
+      })
+      .reverse();
+  }
+
+  // Method 2: Search using getUpdates (fallback)
+  private async searchUsingGetUpdates(videoId: string, limit: number): Promise<TelegramMessage[]> {
     const url = `https://api.telegram.org/bot${this.config.botToken}/getUpdates`;
     
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          limit: limit,
-          allowed_updates: ['channel_post']
-        })
-      });
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        limit: limit,
+        allowed_updates: ['channel_post']
+      })
+    });
 
-      if (!response.ok) {
-        throw new Error(`Telegram API error: ${response.status}`);
-      }
-
-      const data = await response.json() as any;
-      
-      if (!data.ok) {
-        throw new Error(`Telegram API error: ${data.description}`);
-      }
-
-      // Filter and return channel posts that might contain our video
-      return data.result
-        .filter((update: any) => update.channel_post)
-        .map((update: any) => update.channel_post)
-        .filter((message: TelegramMessage) => {
-          const text = message.text || message.caption || '';
-          return text.toLowerCase().includes(videoId.toLowerCase());
-        })
-        .reverse(); // Recent messages first
-
-    } catch (error) {
-      console.error('❌ Error searching Telegram messages:', error);
-      return [];
+    if (!response.ok) {
+      throw new Error(`getUpdates API error: ${response.status}`);
     }
+
+    const data = await response.json() as any;
+    
+    if (!data.ok) {
+      throw new Error(`getUpdates error: ${data.description}`);
+    }
+
+    return data.result
+      .filter((update: any) => update.channel_post)
+      .map((update: any) => update.channel_post)
+      .filter((message: TelegramMessage) => {
+        const text = message.text || message.caption || '';
+        return text.toLowerCase().includes(videoId.toLowerCase());
+      })
+      .reverse();
   }
 
   // Parse message to find video content
