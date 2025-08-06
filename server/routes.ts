@@ -852,7 +852,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Admin routes
-  registerAdminRoutes(app, storage);
+  registerAdminRoutes(app);
 
   const httpServer = createServer(app);
   return httpServer;

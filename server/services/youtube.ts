@@ -1,18 +1,144 @@
-import ytdl from "ytdl-core";
-import { exec } from "child_process";
-import { promisify } from "util";
-import fs from "fs/promises";
-import * as fsSync from "fs";
-import path from "path";
-import { randomBytes } from "crypto";
 import fetch from "node-fetch";
+import { Buffer } from "buffer";
 
-const execAsync = promisify(exec);
+// Add type for hex property
+interface YoutuberClass {
+  hex: string;
+}
 
-// Configuration for user's API server
-const API_URL = process.env.API_URL || "http://localhost:5000/api";
-const VIDEO_API_URL = process.env.VIDEO_API_URL || "http://localhost:5000/api";
-const API_KEY = process.env.API_KEY || "demo-api-key";
+// Third-party YouTube API service (JerryCoder)
+class Youtubers {
+  private hex: string;
+
+  constructor() {
+    this.hex = "C5D58EF67A7584E4A29F6C35BBC4EB12";
+  }
+
+  async uint8(hex: string) {
+    const pecahan = hex.match(/[\dA-F]{2}/gi);
+    if (!pecahan) throw new Error("Format tidak valid");
+    return new Uint8Array(pecahan.map(h => parseInt(h, 16)));
+  }
+
+  b64Byte(b64: string) {
+    const bersih = b64.replace(/\s/g, "");
+    const biner = Buffer.from(bersih, 'base64');
+    return new Uint8Array(biner);
+  }
+
+  async key() {
+    const raw = await this.uint8(this.hex);
+    return await crypto.subtle.importKey("raw", raw, { name: "AES-CBC" }, false, ["decrypt"]);
+  }
+
+  async Data(base64Terenkripsi: string) {
+    const byteData = this.b64Byte(base64Terenkripsi);
+    if (byteData.length < 16) throw new Error("Data terlalu pendek");
+
+    const iv = byteData.slice(0, 16);
+    const data = byteData.slice(16);
+
+    const kunci = await this.key();
+    const hasil = await crypto.subtle.decrypt({ name: "AES-CBC", iv }, kunci, data);
+
+    const teks = new TextDecoder().decode(new Uint8Array(hasil));
+    return JSON.parse(teks);
+  }
+
+  async getCDN() {
+    let retries = 5;
+    while (retries--) {
+      try {
+        const res = await fetch("https://media.savetube.me/api/random-cdn");
+        const data = await res.json() as any;
+        if (data?.cdn) return data.cdn;
+      } catch {}
+    }
+    throw new Error("Gagal ambil CDN setelah 5 percobaan");
+  }
+
+  async infoVideo(linkYoutube: string) {
+    const cdn = await this.getCDN();
+    const res = await fetch(`https://${cdn}/v2/info`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: linkYoutube }),
+    });
+
+    const hasil = await res.json() as any;
+    if (!hasil.status) throw new Error(hasil.message || "Gagal ambil data video");
+
+    const isi = await this.Data(hasil.data);
+    return {
+      judul: isi.title,
+      durasi: isi.durationLabel,
+      thumbnail: isi.thumbnail,
+      kode: isi.key
+    };
+  }
+
+  async getDownloadLink(kodeVideo: string, kualitas: string, downloadType: 'video' | 'audio' = 'video') {
+    let retries = 5;
+    while (retries--) {
+      try {
+        const cdn = await this.getCDN();
+        const res = await fetch(`https://${cdn}/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            downloadType: downloadType,
+            quality: kualitas,
+            key: kodeVideo,
+          }),
+        });
+
+        const json = await res.json() as any;
+        if (json?.status && json?.data?.downloadUrl) {
+          return json.data.downloadUrl;
+        }
+      } catch {}
+    }
+    throw new Error("Gagal ambil link unduh setelah 5 percobaan");
+  }
+
+  async downloadVideo(linkYoutube: string, kualitas: string = '360') {
+    try {
+      const data = await this.infoVideo(linkYoutube);
+      const linkUnduh = await this.getDownloadLink(data.kode, kualitas, 'video');
+      return {
+        status: true,
+        judul: data.judul,
+        durasi: data.durasi,
+        thumbnail: data.thumbnail,
+        url: linkUnduh,
+      };
+    } catch (err: any) {
+      return {
+        status: false,
+        pesan: err.message
+      };
+    }
+  }
+
+  async downloadAudio(linkYoutube: string) {
+    try {
+      const data = await this.infoVideo(linkYoutube);
+      const linkUnduh = await this.getDownloadLink(data.kode, '128', 'audio');
+      return {
+        status: true,
+        judul: data.judul,
+        durasi: data.durasi,
+        thumbnail: data.thumbnail,
+        url: linkUnduh,
+      };
+    } catch (err: any) {
+      return {
+        status: false,
+        pesan: err.message
+      };
+    }
+  }
+}
 
 interface VideoInfo {
   title: string;
@@ -29,314 +155,132 @@ interface DownloadResult {
 }
 
 class YouTubeService {
-  private tempDir = "/tmp/tubeapi";
-  private downloadsDir = "downloads";
+  private youtubers: Youtubers;
 
   constructor() {
-    // Ensure directories exist
-    this.ensureDirectories();
+    this.youtubers = new Youtubers();
   }
 
-  private async ensureDirectories() {
-    try {
-      await fs.mkdir(this.tempDir, { recursive: true });
-      await fs.mkdir(this.downloadsDir, { recursive: true });
-    } catch (error) {
-      console.error("Failed to create directories:", error);
+  private extractVideoId(url: string): string {
+    const regex = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/;
+    const match = url.match(regex);
+    if (!match) {
+      throw new Error("Invalid YouTube URL");
     }
-  }
-
-  private getCookieFile(): string | null {
-    try {
-      const cookieDir = path.join(process.cwd(), "cookies");
-      
-      if (!fsSync.existsSync(cookieDir)) {
-        return null;
-      }
-      const cookieFiles = fsSync.readdirSync(cookieDir).filter((f: string) => f.endsWith('.txt'));
-      if (cookieFiles.length === 0) {
-        return null;
-      }
-      return path.join(cookieDir, cookieFiles[Math.floor(Math.random() * cookieFiles.length)]);
-    } catch (error) {
-      console.error("Error getting cookie file:", error);
-      return null;
-    }
+    return match[1];
   }
 
   async getVideoInfo(videoId: string): Promise<VideoInfo | null> {
     try {
       const url = `https://www.youtube.com/watch?v=${videoId}`;
+      const info = await this.youtubers.infoVideo(url);
       
-      // Try with yt-dlp first (with cookies if available)
-      try {
-        const cookieFile = this.getCookieFile();
-        const cookieFlag = cookieFile ? `--cookies "${cookieFile}"` : '';
-        const { stdout } = await execAsync(`yt-dlp ${cookieFlag} --dump-json "${url}"`);
-        const info = JSON.parse(stdout);
-        
-        return {
-          title: this.sanitizeTitle(info.title || `Video_${videoId}`),
-          duration: this.formatDuration(info.duration || 0),
-          thumbnail: info.thumbnail || "",
-          videoId
-        };
-      } catch (ytDlpError) {
-        console.warn("yt-dlp failed, falling back to ytdl-core:", ytDlpError);
-        
-        // Fallback to ytdl-core
-        const info = await ytdl.getInfo(url);
-        const duration = this.formatDuration(parseInt(info.videoDetails.lengthSeconds));
-        
-        return {
-          title: this.sanitizeTitle(info.videoDetails.title || `Video_${videoId}`),
-          duration,
-          thumbnail: info.videoDetails.thumbnails[0]?.url || "",
-          videoId
-        };
-      }
+      return {
+        title: this.sanitizeTitle(info.judul || `Video_${videoId}`),
+        duration: info.durasi || "Unknown",
+        thumbnail: info.thumbnail || "",
+        videoId
+      };
     } catch (error) {
       console.error("Failed to get video info:", error);
       return null;
     }
   }
 
-  // API download methods using user's server
   async downloadSongViaAPI(videoId: string): Promise<DownloadResult> {
     try {
-      const filePath = path.join(this.downloadsDir, `${videoId}.mp3`);
+      const url = `https://www.youtube.com/watch?v=${videoId}`;
+      console.log(`Downloading audio for video ${videoId} via third-party API`);
       
-      // Check if file already exists in local cache
-      if (await this.fileExists(filePath)) {
-        console.log(`File already exists in cache: ${filePath}`);
-        const buffer = await fs.readFile(filePath);
-        return { buffer, isDirect: true };
+      const result = await this.youtubers.downloadAudio(url);
+      
+      if (!result.status) {
+        throw new Error(result.pesan || "Audio download failed");
       }
 
-      // Call our own API to trigger download and Telegram upload
-      const songUrl = `${API_URL}/song/${videoId}`;
-      console.log(`Calling song API: ${songUrl}`);
-      
-      // Poll API for download status
-      for (let attempt = 0; attempt < 10; attempt++) {
-        const response = await fetch(songUrl, {
-          headers: {
-            'Authorization': `Bearer ${API_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        if (!response.ok) {
-          throw new Error(`API request failed with status ${response.status}`);
-        }
-
-        const data = await response.json() as any;
-        console.log(`API Response attempt ${attempt + 1}:`, data);
-
-        if (data.status === "completed" && data.downloadUrl) {
-          // File is uploaded to Telegram, return the Telegram URL for streaming
-          return { 
-            buffer: undefined, 
-            isDirect: false, 
-            filePath: data.downloadUrl // This will be the Telegram file URL
-          };
-        } else if (data.status === "processing") {
-          console.log("Still processing, waiting...");
-          await new Promise(resolve => setTimeout(resolve, 4000));
-        } else if (data.status === "failed") {
-          throw new Error(`Download failed: ${data.error || 'Unknown error'}`);
-        }
-      }
-
-      throw new Error("Max retries reached. Still downloading...");
+      return {
+        buffer: undefined,
+        isDirect: false,
+        filePath: result.url // Direct download URL from third-party API
+      };
     } catch (error) {
-      console.error("API song download failed:", error);
+      console.error("API audio download failed:", error);
       return { isDirect: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
-  async downloadVideoViaAPI(videoId: string): Promise<DownloadResult> {
+  async downloadVideoViaAPI(videoId: string, quality: string = "360"): Promise<DownloadResult> {
     try {
-      const filePath = path.join(this.downloadsDir, `${videoId}.mp4`);
+      const url = `https://www.youtube.com/watch?v=${videoId}`;
+      console.log(`Downloading video for ${videoId} via third-party API with quality ${quality}`);
       
-      // Check if file already exists in local cache
-      if (await this.fileExists(filePath)) {
-        console.log(`File already exists in cache: ${filePath}`);
-        const buffer = await fs.readFile(filePath);
-        return { buffer, isDirect: true };
+      const result = await this.youtubers.downloadVideo(url, quality);
+      
+      if (!result.status) {
+        throw new Error(result.pesan || "Video download failed");
       }
 
-      // Call our own API to trigger download and Telegram upload
-      const videoUrl = `${VIDEO_API_URL}/video/${videoId}`;
-      console.log(`Calling video API: ${videoUrl}`);
-      
-      // Poll API for download status
-      for (let attempt = 0; attempt < 10; attempt++) {
-        const response = await fetch(videoUrl, {
-          headers: {
-            'Authorization': `Bearer ${API_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        if (!response.ok) {
-          throw new Error(`API request failed with status ${response.status}`);
-        }
-
-        const data = await response.json() as any;
-        console.log(`API Response attempt ${attempt + 1}:`, data);
-
-        if (data.status === "completed" && data.downloadUrl) {
-          // File is uploaded to Telegram, return the Telegram URL for streaming
-          return { 
-            buffer: undefined, 
-            isDirect: false, 
-            filePath: data.downloadUrl // This will be the Telegram file URL
-          };
-        } else if (data.status === "processing") {
-          console.log("Still processing, waiting...");
-          await new Promise(resolve => setTimeout(resolve, 8000));
-        } else if (data.status === "failed") {
-          throw new Error(`Download failed: ${data.error || 'Unknown error'}`);
-        }
-      }
-
-      throw new Error("Max retries reached. Still downloading...");
+      return {
+        buffer: undefined,
+        isDirect: false,
+        filePath: result.url // Direct download URL from third-party API
+      };
     } catch (error) {
       console.error("API video download failed:", error);
       return { isDirect: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
-  private async fileExists(filePath: string): Promise<boolean> {
-    try {
-      await fs.access(filePath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   async downloadAudio(videoId: string): Promise<Buffer | null> {
     try {
-      // Direct download with yt-dlp (no recursive API calls)
       const url = `https://www.youtube.com/watch?v=${videoId}`;
-      const fileName = `audio_${videoId}_${randomBytes(4).toString('hex')}`;
-      const outputPath = path.join(this.tempDir, fileName);
+      console.log(`Direct audio download for video ${videoId}`);
       
-      const cookieFile = this.getCookieFile();
-      const cookieFlag = cookieFile ? `--cookies "${cookieFile}"` : '';
+      const result = await this.youtubers.downloadAudio(url);
       
-      console.log(`Downloading high-quality audio for video ${videoId} with yt-dlp`);
-      
-      // Download highest quality audio with yt-dlp
-      const command = `yt-dlp ${cookieFlag} -f "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio" --extract-audio --audio-format mp3 --audio-quality 0 -o "${outputPath}.%(ext)s" "${url}"`;
-      
-      await execAsync(command, { timeout: 300000 }); // 5 minute timeout
-      
-      // Find the downloaded file (yt-dlp may change extension)
-      const files = await fs.readdir(this.tempDir);
-      const audioFile = files.find(f => f.startsWith(fileName));
-      
-      if (!audioFile) {
-        throw new Error("Downloaded file not found");
+      if (!result.status) {
+        throw new Error(result.pesan || "Audio download failed");
       }
-      
-      const fullPath = path.join(this.tempDir, audioFile);
-      const buffer = await fs.readFile(fullPath);
-      
-      // Clean up temp file
-      await fs.unlink(fullPath).catch(() => {});
-      
+
+      // Download the file from the URL
+      const response = await fetch(result.url);
+      if (!response.ok) {
+        throw new Error(`Failed to download audio: ${response.statusText}`);
+      }
+
+      const buffer = await response.buffer();
       console.log(`Audio download completed: ${buffer.length} bytes`);
       return buffer;
-      
     } catch (error) {
       console.error("Failed to download audio:", error);
       return null;
     }
   }
 
-  async downloadVideo(videoId: string, quality: string = "best"): Promise<Buffer | null> {
+  async downloadVideo(videoId: string, quality: string = "360"): Promise<Buffer | null> {
     try {
-      // Direct download with yt-dlp (no recursive API calls)
       const url = `https://www.youtube.com/watch?v=${videoId}`;
-      const fileName = `video_${videoId}_${randomBytes(4).toString('hex')}`;
-      const outputPath = path.join(this.tempDir, fileName);
+      console.log(`Direct video download for ${videoId} with quality ${quality}`);
       
-      const cookieFile = this.getCookieFile();
-      const cookieFlag = cookieFile ? `--cookies "${cookieFile}"` : '';
+      const result = await this.youtubers.downloadVideo(url, quality);
       
-      console.log(`Downloading HIGHEST quality video for ${videoId} with yt-dlp (AUTO-SELECT BEST)`);
-      
-      // Always select the highest quality available - AUTO HIGHER QUALITY SELECTION
-      let formatSelector = "best[ext=mp4]/best";
-      
-      // Priority order: 4K -> 1440p -> 1080p -> 720p -> 480p -> any best
-      if (quality === "best" || !quality) {
-        // Auto-select highest available quality (4K -> 1080p -> 720p -> best)
-        formatSelector = "best[height<=2160][ext=mp4]/best[height<=1440][ext=mp4]/best[height<=1080][ext=mp4]/best[height<=720][ext=mp4]/best[ext=mp4]/best";
-        console.log(`🎯 AUTO-SELECTING HIGHEST QUALITY: Trying 4K->1440p->1080p->720p->best`);
-      } else {
-        // Manual quality selection (for backwards compatibility)
-        switch (quality) {
-          case "4K":
-          case "2160p":
-            formatSelector = "best[height<=2160][ext=mp4]/best[ext=mp4]";
-            break;
-          case "1440p":
-            formatSelector = "best[height<=1440][ext=mp4]/best[ext=mp4]";
-            break;
-          case "1080p":
-            formatSelector = "best[height<=1080][ext=mp4]/best[ext=mp4]";
-            break;
-          case "720p":
-            formatSelector = "best[height<=720][ext=mp4]/best[ext=mp4]";
-            break;
-          case "480p":
-            formatSelector = "best[height<=480][ext=mp4]/best[ext=mp4]";
-            break;
-          default:
-            formatSelector = "best[ext=mp4]/best";
-        }
+      if (!result.status) {
+        throw new Error(result.pesan || "Video download failed");
       }
-      
-      const command = `yt-dlp ${cookieFlag} -f "${formatSelector}" -o "${outputPath}.%(ext)s" "${url}"`;
-      
-      await execAsync(command, { timeout: 600000 }); // 10 minute timeout for video
-      
-      // Find the downloaded file
-      const files = await fs.readdir(this.tempDir);
-      const videoFile = files.find(f => f.startsWith(fileName));
-      
-      if (!videoFile) {
-        throw new Error("Downloaded file not found");
+
+      // Download the file from the URL
+      const response = await fetch(result.url);
+      if (!response.ok) {
+        throw new Error(`Failed to download video: ${response.statusText}`);
       }
-      
-      const fullPath = path.join(this.tempDir, videoFile);
-      const buffer = await fs.readFile(fullPath);
-      
-      // Clean up temp file
-      await fs.unlink(fullPath).catch(() => {});
-      
+
+      const buffer = await response.buffer();
       console.log(`Video download completed: ${buffer.length} bytes`);
       return buffer;
-      
     } catch (error) {
       console.error("Failed to download video:", error);
       return null;
     }
-  }
-
-  private formatDuration(seconds: number): string {
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    
-    if (hours > 0) {
-      return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
   }
 
   private sanitizeTitle(title: string): string {

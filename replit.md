@@ -48,6 +48,7 @@ The application includes comprehensive tables for:
 - **2025-01-06**: Migrated database connection from Neon to standard PostgreSQL for Replit compatibility
 - **2025-01-06**: Fixed ES module imports for pg package
 - **2025-01-06**: Successfully deployed database schema using Drizzle
+- **2025-01-06**: **MAJOR UPDATE**: Integrated third-party YouTube API service from JerryCoder - completely replaced yt-dlp and cookies approach with direct download URLs. No more YouTube cookies needed!
 
 ## User Preferences
 - Keep security practices robust with proper client/server separation
